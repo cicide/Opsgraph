@@ -1,0 +1,40 @@
+[general]
+logpath = /home/graphtool/graphtool/log/
+logfile = graphtool.log
+loglevel = DEBUG
+httpport = 8080
+local_ip = 50.0.96.196
+
+[graph]
+duration_length = 2
+duration_unit = d
+date_format = %b %d %H:%M
+autocomplete_series = yes
+
+[database]
+dbname = graphtool
+username = graphtool
+password = klsdj893h27
+host = 192.168.10.31
+
+[events]
+full_load_period = 3600
+incremental_load_period = 300
+
+[opsview_server_netgeeks]
+name = netgeeks
+host = http://opsview.netgeeks.net
+login = admin
+password = initial
+shared_secret = jds9ned893nnd9fj
+api_tool = rest/graph
+rescan = 3600
+
+[opsview_server_kixeye]
+name = kixeye
+host = https://opsview.kixeye.com
+login = cicide
+password = hi.there.chris
+shared_secret = 67534CD4-2969-11E0-B634-349DCCD000B0
+api_tool = rest/graph
+rescan = 3600
