@@ -189,8 +189,97 @@ Extern.ExternWidget.methods(
         theForm.setAttribute('id', 'graphSelectForm');
         theForm.onSubmit = function() {self.onMetricSelect(this)};
         // the top rows should be data rows from previously entered series
-        // create the input row
+        
+        // create the accordian div
+        //var theAccordianDiv = document.createElement('div');
+        //theAccordianDiv.setAttribute('id', 'accordian');
+        
+        // create the Regexp Entry Header Row
+        //var theRegexpHeaderRow = document.createElement('tr');
+        //var theRegexpHeaderCell = document.createElement('td');
+        //theRegexpHeaderCell.setAttribute('colspan', '5');
+        //var theRegexpHeader = document.createElement('h3');
+        //var theRegexpHeaderText = document.createTextNode('Regular Expression Entry');
+        //theRegexpHeader.appendChild(theRegexpHeaderText);
+        //theRegexpHeaderCell.appendChild(theRegexpHeader);
+        //theRegexpHeaderRow.appendChild(theRegexpHeaderCell);
+        //theAccordianDiv.appendChild(theRegexpHeaderRow);
+        
+        // create the input rows
+        var theRegexpSelectRow = document.createElement('tr');
+        theRegexpSelectRow.setAttribute('id', 'selectb');
+        // create the node input cell
+        var theNodeRegexpCell = document.createElement('td');
+        var theNodeRegexp = document.createElement('input');
+        theNodeRegexp.setAttribute('type', 'text');
+        theNodeRegexp.setAttribute('id', 'nodeRegexp');
+        theNodeRegexp.value = '.*';
+        theNodeRegexp.name = 'd';
+        theNodeRegexp.onkeyup = function () {self.onChangeRegexp(theNodeRegexp)};
+        theNodeRegexpCell.appendChild(theNodeRegexp);
+        theRegexpSelectRow.appendChild(theNodeRegexpCell)
+        // create the host input cell
+        var theHostRegexpCell = document.createElement('td');
+        var theHostRegexp = document.createElement('input');
+        theHostRegexp.setAttribute('type', 'text');
+        theHostRegexp.setAttribute('id', 'hostRegexp');
+        theHostRegexp.value = '.*';
+        theHostRegexp.name = 'h';
+        theHostRegexp.onkeyup = function () {self.onChangeRegexp(theHostRegexp)};
+        theHostRegexpCell.appendChild(theHostRegexp);
+        theRegexpSelectRow.appendChild(theHostRegexpCell);
+        // create the service input cell
+        var theServiceRegexpCell = document.createElement('td');
+        var theServiceRegexp = document.createElement('input');
+        theServiceRegexp.setAttribute('type', 'text');
+        theServiceRegexp.setAttribute('id', 'serviceRegexp');
+        theServiceRegexp.value = '.*';
+        theServiceRegexp.name = 's';
+        theServiceRegexp.onkeyup = function () {self.onChangeRegexp(theServiceRegexp)};
+        theServiceRegexpCell.appendChild(theServiceRegexp);
+        theRegexpSelectRow.appendChild(theServiceRegexpCell);
+        //create the metric input cell
+        var theMetricRegexpCell = document.createElement('td');
+        var theMetricRegexp = document.createElement('input');
+        theMetricRegexp.setAttribute('type', 'text');
+        theMetricRegexp.setAttribute('id', 'metricRegexp');
+        theMetricRegexp.value = '.*';
+        theMetricRegexp.name = 'm';
+        theMetricRegexp.onkeyup = function () {self.onChangeRegexp(theMetricRegexp)};
+        theMetricRegexpCell.appendChild(theMetricRegexp);
+        theRegexpSelectRow.appendChild(theMetricRegexpCell);
+        // create the action cell and hide it
+        var theRegexpActionCell = document.createElement('td');
+        var theRegexpActionCellSubmit = document.createElement('input');
+        theRegexpActionCellSubmit.setAttribute('id', 'regexp_button');
+        theRegexpActionCellSubmit.setAttribute('type', 'button');
+        theRegexpActionCellSubmit.setAttribute('value', 'Add to Graph');
+        theRegexpActionCellSubmit.onclick = function() {self.onRegexpSelect()};
+        theRegexpActionCell.appendChild(theRegexpActionCellSubmit);
+        theRegexpActionCell.setAttribute('id', 'regexp_submit_cell');
+        theRegexpSelectRow.appendChild(theRegexpActionCell);
+        //theAccordianDiv.appendChild(theRegexpSelectRow);
+        tbo.appendChild(theRegexpSelectRow);
+        
+        self.callRemote('initRegexp', theNodeRegexp.value,theHostRegexp.value,theServiceRegexp.value,theMetricRegexp.value).addCallback(
+            function (result) {
+                theRegexpActionCellSubmit.value = 'Add '+parseInt(result)+' matches to Graph';
+            }
+        );
+        
+        // create the Select Entry Header Row
+        //var theSelectHeaderRow = document.createElement('tr');
+        //var theSelectHeaderCell = document.createElement('td');
+        //theSelectHeaderCell.setAttribute('colspan', '5');
+        //var theSelectHeader = document.createElement('h3');
+        //var theSelectHeaderText = document.createTextNode('Selection Entry');
+        //theSelectHeader.appendChild(theSelectHeaderText);
+        //theSelectHeaderCell.appendChild(theSelectHeader);
+        //theSelectHeaderRow.appendChild(theSelectHeaderCell);
+        //theAccordianDiv.appendChild(theSelectHeaderRow);
+        
         var theSeriesSelectRow = document.createElement('tr');
+        theSeriesSelectRow.setAttribute('id','selecta');
         // create the node select cell
         var theNodeSelectCell = document.createElement('td');
         var tmp = new Array();
@@ -226,7 +315,6 @@ Extern.ExternWidget.methods(
         var theActionCell = document.createElement('td');
         var theActionCellSubmit = document.createElement('input');
         theActionCellSubmit.setAttribute('type', 'button');
-        // theActionCellSubmit.setAttribute('name', 'Add to Graph');
         theActionCellSubmit.setAttribute('value', 'Add to Graph');
         theActionCellSubmit.onclick = function() {self.onMetricSelect()};
         theActionCell.appendChild(theActionCellSubmit);
@@ -234,6 +322,8 @@ Extern.ExternWidget.methods(
         theActionCell.style.display = 'none';
         theSeriesSelectRow.appendChild(theActionCell);
         tbo.appendChild(theSeriesSelectRow);
+        //theAccordianDiv.appendChild(theSeriesSelectRow);
+        //tbo.appendChild(theAccordianDiv);
         // put together the table
         selectTable.appendChild(tbh);
         selectTable.appendChild(tbo);
@@ -299,11 +389,26 @@ Extern.ExternWidget.methods(
         theBigTable.appendChild(theSaveGraphButtonRow);
         // add the big table to the body of the page
         theSection.appendChild(theBigTable);
+        //var $jq = jQuery.noConflict();
+        //$jq("#accordian").accordion();
         self.callRemote('getOptions', 'node_options');
     },
 
     function onMetricSelect(self) {
         self.callRemote('addServiceMetric', 'submit');
+        return false;
+    },
+    
+    function onRegexpSelect(self) {
+        self.callRemote('addRegexpSelect').addCallback(
+            function(result) {
+                var dhsmLength = result.length
+                for (i=0; i<dhsmLength; i++) {
+                    self.addGraphSeries(result[i][0], result[i][1], result[i][2], result[i][3], result[i][4])
+                }
+                self.updateRegexpButton(0);
+            }
+        );
         return false;
     },
     
@@ -502,7 +607,7 @@ Extern.ExternWidget.methods(
     function addGraphSeries(self, node, host, service, metric, row_id) {
         var tbo = document.getElementById('graphSelectTableBody');
         var tboRowCount = tbo.rows.length;
-        var insertIndex = tboRowCount - 1;
+        var insertIndex = tboRowCount - 2;
         var row = tbo.insertRow(insertIndex);
         row.setAttribute('id', 'seriesId'+row_id);
         var nodeCell = row.insertCell(0);
@@ -640,6 +745,21 @@ Extern.ExternWidget.methods(
         return false;
     },
     
+    function onChangeRegexp(self, theRegexp) {
+        var tmp = theRegexp.value;
+        var tmp2 = theRegexp.name;
+        self.callRemote('setRegexp', tmp2, tmp).addCallback(
+            function(result) {
+                self.updateRegexpButton(result);
+            }
+        );
+    },
+    
+    function updateRegexpButton(self, matches) {
+        var theRegexpButton = document.getElementById('regexp_button');
+        theRegexpButton.value = 'Add '+parseInt(matches)+' matches to Graph';
+    },
+    
     function onChangeSelect(self, theSelected) {
         var selIndex = theSelected.selectedIndex;
         var theValue = theSelected.options[selIndex].value;
@@ -747,5 +867,10 @@ Extern.ExternWidget.methods(
         var $jq = jQuery.noConflict();
         $jq('#'+error_element).removeClass('input-error');
         return false;
+    },
+    
+    function reDirect(self, url) {
+        window.location = url;
+        return true;
     }
 );

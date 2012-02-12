@@ -27,14 +27,6 @@ if auto_series in ('Yes', 'yes'):
 else:
     auto_series = False
 
-table_lib = [[u'1',u'monkeys are here', u'monkey population over time', u'cicide', u'12/15/2011 09:27', u'FusionCharts', u'Zoom Chart'],
-             [u'2',u'dogs are here', u'dog population over time', u'jtodd', u'12/11/2011 13:51', u'FusionCharts', u'Zoom Chart'],
-             [u'3',u'cats are here', u'cat population over time', u'dicide', u'12/08/2011 18:08', u'FusionCharts', u'Zoom Chart'],
-             [u'4',u'zebras are here', u'zebra population over time', u'tjones', u'12/14/2011 19:37', u'FusionCharts', u'Zoom Chart'],
-             [u'5',u'my wonderful graph', u'devo fan population over time', u'rprovo', u'11/17/2011 03:05', u'FusionCharts', u'Zoom Chart'],
-             [u'6',u'fun stuff', u'errors over time', u'cicide', u'11/30/2011 09:45', u'FusionCharts', u'Zoom Chart']
-            ]
-
 class Mind:
     def __init__(self, request, credentials):
         self.request = request
@@ -93,8 +85,6 @@ class opsviewRealm(object):
     def createLogout(self, avatarId, mind):
         def logout():
             session = mind.request.getSession()
-            #sess_sub = session.getComponent(ISubscriberObject)
-            #sess_sub.logout()
             l = avatarId.logout()
             session.setComponent(ISubscriberObject, None)
         return logout
@@ -176,6 +166,7 @@ class RootPage(rend.Page):
         if sess_sub != self.subscriber:
             session.setComponent(ISubscriberObject, self.subscriber)
         username = self.subscriber.getUserName()
+        self.subscriber.registerAvatarLogout(session)
         return 'Opsgraph: Main Menu'
     
     def child_createGraph(self, ctx):
@@ -241,6 +232,7 @@ class RootPage(rend.Page):
             ]
         ]
     )
+    
 class ViewGraphPage(athena.LivePage):
     
     def __init__(self, *a, **kw):
@@ -261,7 +253,8 @@ class ViewGraphPage(athena.LivePage):
             chart_dbId = 0
         log.debug('got chart id: %s' % chart_dbId)
         subscriber = session.getComponent(ISubscriberObject)
-        f = ViewGraphsElement(subscriber, chart_dbId)
+        d = self.notifyOnDisconnect()
+        f = ViewGraphsElement(subscriber, chart_dbId, d)
         f.setFragmentParent(self)
         return ctx.tag[f]
     
@@ -283,16 +276,18 @@ class ViewGraphPage(athena.LivePage):
     )
     
 class ViewGraphsElement(athena.LiveElement):
-    jsClass = u'ViewGraphs.ViewGraphWidget'
     
-    def __init__(self, subscriber, chart_dbId, *a, **kw):
+    def __init__(self, subscriber, chart_dbId, disc_defer, *a, **kw):
         super(ViewGraphsElement, self).__init__(*a, **kw)
         self.subscriber = subscriber
         self.chart_dbId = chart_dbId
-    
-    docFactory = loaders.stan(
-        T.div(render=T.directive('liveElement')))
-    
+        disc_defer.addCallbacks(self.discon,self.discon)
+        self.subscriber.registerLiveElement(self)
+        
+    def discon(self, result):
+        log.debug('this live element has been disconnected')
+        self.subscriber.unregisterLiveElement(self)
+
     def initialize(self):
         def onGraphLoaded(result):
             log.debug(result)
@@ -307,6 +302,9 @@ class ViewGraphsElement(athena.LiveElement):
         d.addCallbacks(onGraphLoaded,onFailure)
         return d
     
+    def pageQuit(self):
+        d = self.callRemote('reDirect', unicode('/'))
+        
     def makeGraph(self, chart):
         def onSuccess(result):
             #format the data for fusion charts
@@ -327,9 +325,12 @@ class ViewGraphsElement(athena.LiveElement):
             log.error(reason)
         #get the data from opsview for the requested graph
         d = self.subscriber.makeGraph(chart)
-        d.addCallbacks(onSuccess,onFailure)    
-        
+        d.addCallbacks(onSuccess,onFailure)
+
     initialize = expose(initialize)
+    jsClass = u'ViewGraphs.ViewGraphWidget'
+    docFactory = loaders.stan(
+        T.div(render=T.directive('liveElement')))
     
 class ViewSuitesPage(athena.LivePage):
 
@@ -337,12 +338,6 @@ class ViewSuitesPage(athena.LivePage):
         super(ViewSuitesPage, self).__init__(*a, **kw)
         modulePath = filepath.FilePath(__file__).parent().child('js').child('graphtool_suite.js')
         self.jsModules.mapping.update( {'ViewSuites': modulePath.path} )
-        
-    def discon(self, result, subscriber):
-        log.debug('someone disconnected from our page')
-        
-    def disconErr(self, reason, subscriber):
-        log.debug('someone disconnected with error from our page')
         
     def render_theTitle(self, ctx, data):
         return 'Opsgraph: View Suite'
@@ -395,7 +390,6 @@ class ViewSuitesPage(athena.LivePage):
         )
     
 class ViewSuitesElement(athena.LiveElement):
-    jsClass = u'ViewSuites.ViewSuiteWidget'
     
     def __init__(self, subscriber, graph_list, suite_dbId, suite_perms, disc_defer, *a, **kw):
         super(ViewSuitesElement, self).__init__(*a, **kw)
@@ -407,13 +401,15 @@ class ViewSuitesElement(athena.LiveElement):
         self.suite.registerSubscriber(self)
         self.changeList = []
         disc_defer.addCallbacks(self.discon,self.discon)
+        self.subscriber.registerLiveElement(self)
     
-    docFactory = loaders.stan(
-        T.div(render=T.directive('liveElement')))
-    
+    def pageQuit(self):
+        d = self.callRemote('reDirect', unicode('/'))
+
     def discon(self, result):
         log.debug('this live element has been disconnected')
         self.suite.unregisterSubscriber(self)
+        self.subscriber.unregisterLiveElement(self)
         
     def updateSuite(self, item, value):
         log.debug('Got suite update request for %s with value of %s' % (item, value))
@@ -582,6 +578,9 @@ class ViewSuitesElement(athena.LiveElement):
     saveSuite = expose(saveSuite)
     setItem = expose(setItem)
     applyOverrides = expose(applyOverrides)
+    jsClass = u'ViewSuites.ViewSuiteWidget'
+    docFactory = loaders.stan(
+        T.div(render=T.directive('liveElement')))
     
 class LoadSuitePage(athena.LivePage):
     
@@ -638,9 +637,14 @@ class LoadSuitesElement(athena.LiveElement):
         super(LoadSuitesElement, self).__init__(*a, **kw)
         self.subscriber = subscriber
         disc_defer.addCallbacks(self.discon,self.discon)
+        self.subscriber.registerLiveElement(self)
+    
+    def pageQuit(self):
+        d = self.callRemote('reDirect', unicode('/'))
     
     def discon(self, result):
         log.debug('this live element has been disconnected')
+        self.subscriber.unregisterLiveElement(self)
     
     def initialize(self):
         def onSuccess(result):
@@ -675,15 +679,13 @@ class LoadSuitesElement(athena.LiveElement):
         d.addCallback(onSuccess, suite_ids).addErrback(onFailure)
         return d
     
-    jsClass = u'LoadSuites.LoadSuiteWidget'
-    
-    docFactory = loaders.stan(
-        T.div(render=T.directive('liveElement')))
-    
     initialize = expose(initialize)
     editSuite = expose(editSuite)
     viewSuite = expose(viewSuite)
     deleteSuites = expose(deleteSuites)
+    jsClass = u'LoadSuites.LoadSuiteWidget'
+    docFactory = loaders.stan(
+        T.div(render=T.directive('liveElement')))
 
 class LoadGraphPage(athena.LivePage):
     
@@ -698,7 +700,8 @@ class LoadGraphPage(athena.LivePage):
     def render_loadGraphsElement(self, ctx, data):
         session = ISession(ctx)
         subscriber = session.getComponent(ISubscriberObject)
-        f = LoadGraphsElement(subscriber)
+        d = self.notifyOnDisconnect()
+        f = LoadGraphsElement(subscriber, d)
         f.setFragmentParent(self)
         return ctx.tag[f]
     
@@ -737,15 +740,20 @@ class LoadGraphPage(athena.LivePage):
     )
     
 class LoadGraphsElement(athena.LiveElement):
-    jsClass = u'LoadGraphs.LoadGraphWidget'
     
-    def __init__(self, subscriber, *a, **kw):
+    def __init__(self, subscriber, disc_defer, *a, **kw):
         super(LoadGraphsElement, self).__init__(*a, **kw)
         self.subscriber = subscriber
-    
-    docFactory = loaders.stan(
-        T.div(render=T.directive('liveElement')))
-    
+        disc_defer.addCallbacks(self.discon,self.discon)
+        self.subscriber.registerLiveElement(self)
+
+    def pageQuit(self):
+        d = self.callRemote('reDirect', unicode('/'))
+
+    def discon(self, result):
+        log.debug('this live element has been disconnected')
+        self.subscriber.unregisterLiveElement(self)
+        
     def initialize(self):
         def onSuccess(result):
             self.callRemote('addGraphListings', result)
@@ -799,59 +807,28 @@ class LoadGraphsElement(athena.LiveElement):
     editGraph = expose(editGraph)
     viewGraph = expose(viewGraph)
     createSuite = expose(createSuite)
-
-class CreateSuitePage(rend.Page):
-
-    def __init__(self):
-        rend.Page.__init__(self)
-        self.subscriber = None
-    
-    addSlash = True
-    
-    def render_theTitle(self, ctx, data):
-        session = ISession(ctx)
-        request = IRequest(ctx)
-        log.debug(request.args)
-        if 'glist' in request.args:
-            glist = request.args['glist'][0]
-            g_list = str(glist).split('|')
-            log.debug(g_list)
-        else:
-            g_list = []
-        self.subscriber = session.getComponent(ISubscriberObject)
-        return 'Opsgraph: Create Suite'
-    
-    def render_theBody(self, ctx, data):
-        username = self.subscriber.getUserName()
-        return 'Hello %s!' % username
-    
+    jsClass = u'LoadGraphs.LoadGraphWidget'
     docFactory = loaders.stan(
-        T.html[
-            T.head[
-                T.title[render_theTitle]
-            ],
-            T.body[render_theBody]
-        ]
-    )
-
-class ExternalHandler():
-    def __init__(self, subscriber):
-        self.subscriber = subscriber
-        
-    def addSubscriber(self, subscriber):
-        self.subscriber = subscriber
+        T.div(render=T.directive('liveElement')))
 
 class ExternalElement(athena.LiveElement):
-    jsClass = u'Extern.ExternWidget'
-    _tpl = filepath.FilePath(__file__).parent().child('templates').child('athena_livepage.html')
-    docFactory = loaders.xmlfile(_tpl.path)
     
-    def __init__(self, externHandler, subscriber, *a, **kw):
+    def __init__(self, subscriber, disc_defer, *a, **kw):
         super(ExternalElement, self).__init__(*a, **kw)
-        self.externHandler = externHandler
         self.subscriber = subscriber
+        disc_defer.addCallbacks(self.discon,self.discon)
         self.chart = self.subscriber.editGraphInit()
+        self.subscriber.registerLiveElement(self)
+        self.regexpCellId = {'d': unicode('nodeRegexp'), 'h': unicode('hostRegexp'), 's': unicode('serviceRegexp'), 'm': unicode('metricRegexp')}
         
+    def pageQuit(self):
+        d = self.callRemote('reDirect', unicode('/'))
+        return d
+        
+    def discon(self, result):
+        log.debug('this live element has been disconnected')
+        self.subscriber.unregisterLiveElement(self)
+
     def setItem(self, item, choice):
         log.debug('Setting %s to %s for %s' % (item, choice, self.subscriber.getUserName()))
         if item == 'node':
@@ -985,7 +962,7 @@ class ExternalElement(athena.LiveElement):
     def addServiceMetric(self, req_action):
         log.debug('got addServiceMetric %s request' % (req_action))
         graphSeries = self.subscriber.addGraphSeries(self.chart)
-        log.debug('got graph series back from subscriber')
+        log.debug('got graph series back from subscriber %s' % graphSeries)
         #log.debug(graphSeries)
         s_node = unicode(graphSeries[0])
         s_host = unicode(graphSeries[1])
@@ -1178,6 +1155,32 @@ class ExternalElement(athena.LiveElement):
         else:
             return False
     
+    def _initRegexp(self, dPatt, hPatt, sPatt, mPatt):
+        d = self.subscriber.setRegexp(self.chart, 'd', dPatt)
+        h = self.subscriber.setRegexp(self.chart, 'h', hPatt)
+        s = self.subscriber.setRegexp(self.chart, 's', sPatt)
+        m = self.subscriber.setRegexp(self.chart, 'm', mPatt)
+        matches = unicode(self.subscriber.getRegexpMatchCount(self.chart)[0])
+        log.debug("Returning %s matches for regexp initialization" % matches)
+        return matches
+    
+    def _setRegexp(self, item, patt):
+        log.debug('Setting regexp %s to %s' % (item, patt))
+        tmp = self.subscriber.setRegexp(self.chart, item, patt)
+        cellId = self.regexpCellId[item]
+        if not tmp:
+            self.callRemote('displayError', unicode('Invalid regexp pattern'), cellId)
+        else:
+            self.callRemote('clearError', unicode('Invalid regexp pattern'), cellId)
+        return unicode(self.subscriber.getRegexpMatchCount(self.chart)[0])
+    
+    def _addRegexpSelect(self):
+        dhsmIndexedList = self.subscriber.addRegexpSelect(self.chart)
+        log.debug(dhsmIndexedList)
+        self.getOptions('node_options')
+        return dhsmIndexedList
+    
+    
     saveGraph = expose(saveGraph)
     initialize = expose(initialize)
     makeGraph = expose(makeGraph)
@@ -1185,6 +1188,12 @@ class ExternalElement(athena.LiveElement):
     addServiceMetric = expose(addServiceMetric)
     setNode = expose(setItem)
     removeRowId = expose(removeRowId)
+    initRegexp = expose(_initRegexp)
+    setRegexp = expose(_setRegexp)
+    addRegexpSelect = expose(_addRegexpSelect)
+    jsClass = u'Extern.ExternWidget'
+    _tpl = filepath.FilePath(__file__).parent().child('templates').child('athena_livepage.html')
+    docFactory = loaders.xmlfile(_tpl.path)
     
 class ExternalPage(athena.LivePage):
     def __init__(self, *a, **kw):
@@ -1199,8 +1208,8 @@ class ExternalPage(athena.LivePage):
         session = ISession(ctx)
         request = ISession(ctx)
         subscriber = session.getComponent(ISubscriberObject)
-        self.externHandler = ExternalHandler(subscriber)
-        f = ExternalElement(self.externHandler, subscriber)
+        d = self.notifyOnDisconnect()
+        f = ExternalElement(subscriber, d)
         f.setFragmentParent(self)
         return ctx.tag[f]
         

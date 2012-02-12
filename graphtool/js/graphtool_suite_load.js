@@ -111,5 +111,6 @@ LoadSuites.LoadSuiteWidget.methods(
     
     function reDirect(self, url) {
         window.location = url;
+        return true;
     }
 );

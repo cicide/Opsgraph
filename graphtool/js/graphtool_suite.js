@@ -525,5 +525,10 @@ ViewSuites.ViewSuiteWidget.methods(
     
     function onChartResize(self, cell, chart) {
         alert('resize called on '+cell);
+    },
+    
+    function reDirect(self, url) {
+        window.location = url;
+        return true;
     }
 );

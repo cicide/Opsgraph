@@ -291,6 +291,7 @@ class chart(object):
     
     def __init__(self, creator, copy_master=None):
         self.owner = creator #subscriber object - possible memory leak area
+        self.domRegexp = self.hostRegexp = self.svcRegexp = self.metRegexp = None
         if copy_master:
             self.name = copy_master.name
             self.title = copy_master.title
@@ -322,7 +323,6 @@ class chart(object):
             self.selected_service = copy_master.selected_service
             self.selected_metric = copy_master.selected_metric
             self.previousSeries = copy_master.previousSeries
-
         else:
             self.name = 'Default Graph Name'
             self.title = 'Default.Graph Title'
@@ -560,6 +560,20 @@ class chart(object):
         res_graphSeries.append(series_index)
         return res_graphSeries
     
+    def addUniqueSeries(self, dhsm):
+        self.seriesCounter += 1
+        series_index = str(self.seriesCounter)
+        self.series.append(series_index)
+        self.seriesTracker[series_index] = dhsm[:]
+        self.metricSeries = []
+        for sel_series in self.series:
+            self.metricSeries.append(self.seriesTracker[sel_series][:])
+        res_dhsm = []
+        for item in dhsm[:]:
+            res_dhsm.append(unicode(item))
+        res_dhsm.append(unicode(series_index))
+        return res_dhsm
+        
     def cancelSeriesId(self, seriesId):
         try:
             series_index = str(seriesId)
@@ -865,4 +879,18 @@ class chart(object):
         d.addCallbacks(onLoadParamSuccess,onFailure)
         return d
         
+    def setRegexp(self, field, patt):
+        if field == 'd':
+            self.domRegexp = patt
+        elif field == 'h':
+            self.hostRegexp = patt
+        elif field == 's':
+            self.svcRegexp = patt
+        elif field == 'm':
+            self.metRegexp = patt
+        else:
+            log.debug('unknown field for regexp')
+    
+    def getRegexp(self):
+        return (self.domRegexp, self.hostRegexp, self.svcRegexp, self.metRegexp)
         

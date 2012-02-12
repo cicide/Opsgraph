@@ -7,6 +7,7 @@ from paste.auth import auth_tkt
 
 import json, time, datetime, urllib
 import utils, rest_api, txdbinterface
+import re, copy
 
 log = utils.get_logger("NodeService")
 cfg_sections = utils.config.sections()
@@ -17,14 +18,38 @@ event_full_load_period = utils.config.get('events', 'full_load_period')
 event_inc_load_period = utils.config.get('events', 'incremental_load_period')
 
 node_list = {}
-host_list = {}
-metric_list = []
 event_type_list = ['outage', 'event']
 
-class opsview_node(object):
+class Node(object):
+    def __init__(self, name, type):
+        self.name = name
+        self.parent = None
+        self.children = {}
+        self.type = type
+         
+    def addChild(self, node):
+        self.children[node.name] = node
+        node.parent = self
+
+    def removeChild(self, name):
+        if children.get(name):
+            del self.children[name]
+
+    def getChildren(self):
+        return self.children 
+
+    def searchChildren(self, pattern):
+        returnList = {}
+        pat = re.compile(pattern, re.I)
+        for key in self.children:
+            if pat.search(key) is not None:
+                returnList[key] = self.children[key]
+        return returnList
+
+class Domain(Node):
     
     def __init__(self, name, host, login, passwd, shared_secret, api_tool, rescan):
-        self.name = name
+        Node.__init__(self, name, "Domain")
         self.host = host.split('//')[1]
         self.uri = host
         self.login = login
@@ -40,7 +65,6 @@ class opsview_node(object):
         self.initialized = False
         self.cred_time = 0
         self.ip_address = None
-        self.node_hosts = []
         self.last_event_id = 0
         self.last_full_event_load = 0
         self.do_dns_lookup(self.host)
@@ -98,6 +122,12 @@ class opsview_node(object):
         d = defer.DeferredList(ds, consumeErrors=False)
         d.addCallbacks(onCompleteSuccess,onFailure)
         
+    def getHostList(self):
+        host_list = []
+        for i in self.children:
+           host_list.append(i)
+        return host_list
+
     def getEvents(self):
         return self.eventList.copy()
     
@@ -117,13 +147,6 @@ class opsview_node(object):
     def onErr(self, reason):
         log.debug(reason)
         
-    def getHostList(self):
-        tmp_list = []
-        for host in self.node_hosts:
-            if host_list[host].getMetricCount():
-                tmp_list.append(host)
-        return tmp_list
-    
     def setVersions(self, easyxdm, api_min, api):
         self.easyxdm_version = easyxdm
         self.api_min_version = api_min
@@ -200,6 +223,9 @@ class opsview_node(object):
             d = rest_api.getInfo(self.uri, 'rest/status/service', headers=self.creds)
             return d.addCallbacks(self.addServices,self.onErr)
             
+    def getHostByName(self, name):
+        return self.children.get(name, None)
+
     def saveMetricData(self, result):
         if result:
             self.cred_time = int(time.time())
@@ -207,12 +233,17 @@ class opsview_node(object):
                 host_metric_list = result['list']
                 log.debug('Metric list is %s records long' % len(host_metric_list))
                 for row in host_metric_list:
-                    metric_list.append(row)
                     host,service,metric = row.split('::')
-                    host_list[str(host)].addServiceMetric(service, metric)
-                    #log.debug('metrics: %i  - adding metric: %s' % (len(metric_list),row))
-                log.info('Found %i graphable metrics for node %s' % (len(metric_list), self.name))
-                log.info('Node initialization for node %s complete' % self.name)
+                    if( service and metric):
+                        host = self.getHostByName(str(host))
+                        if host:
+                            host.addServiceMetric(service, metric)
+                        else:
+                            log.error("Host doesn't exist %s for row %s" % (host, row))
+                    else:
+                        log.info('skipping row: %s  - as something is wrong' % row)
+                log.info('Found %i graphable metrics for domain %s' % (len(host_metric_list), self.name))
+                log.info('Domain initialization for domain %s complete' % self.name)
                 self.initialized = True
                 return 1
             else:
@@ -240,18 +271,18 @@ class opsview_node(object):
                     host_comments = item['comments']
                 else:
                     host_comments = ''
-                self.node_hosts.append(host_name)
-                host_list[host_name] = host(host_alias,
-                                       host_comments,
-                                       item['current_check_attempt'],
-                                       item['downtime'],
-                                       item['icon'],
-                                       item['last_check'],
-                                       item['max_check_attempts'],
-                                       host_name,
-                                       item['num_interfaces'],
-                                       item['num_services'],
-                                       item['output'])
+                host = Host(host_alias,
+                               host_comments,
+                               item['current_check_attempt'],
+                               item['downtime'],
+                               item['icon'],
+                               item['last_check'],
+                               item['max_check_attempts'],
+                               host_name,
+                               item['num_interfaces'],
+                               item['num_services'],
+                               item['output'])
+                self.addChild(host)
                 for svc in item_services:
                     svc_host = host_name
                     svc_name = svc['name']
@@ -267,7 +298,7 @@ class opsview_node(object):
                     svc_state_type = svc['state_type']
                     svc_state_duration = svc['state_duration']
                     svc_unhandled = svc['unhandled']
-                    svc_obj = service(svc_current_check_attempt,
+                    svc_obj = Service(svc_current_check_attempt,
                                       svc_downtime,
                                       svc_last_check,
                                       svc_markdown,
@@ -281,14 +312,12 @@ class opsview_node(object):
                                       svc_state_duration,
                                       svc_unhandled,
                                       svc_host)
-                    host_list[host_name].addService(svc_name, svc_obj)
+                    host.addChild(svc_obj)
             log.info('found %s hosts for node %s' % (host_count, self.name))
             perfmetrics = rest_api.getInfo(self.uri, 'rest/runtime/performancemetric', headers=self.creds)
             perfmetrics.addCallbacks(self.saveMetricData,self.onErr)
             return 1
                 
-            
-    
     def getName(self):
         return self.name
     
@@ -335,7 +364,7 @@ class opsview_node(object):
             secure=secure)
         return ticket.cookie_value()
 
-class host(object):
+class Host(Node):
     
     def __init__(self, 
                  alias, 
@@ -349,6 +378,7 @@ class host(object):
                  num_interfaces,
                  num_services,
                  output):
+        Node.__init__(self, name, "Host")
         self.alias = alias
         self.comments = comments
         self.current_check_attempt = current_check_attempt
@@ -356,65 +386,48 @@ class host(object):
         self.icon = icon
         self.last_check = last_check
         self.max_check_attempts = max_check_attempts
-        self.name = name
         self.num_interfaces = num_interfaces
         self.num_services = num_services
         self.output = output
-        self.service_list = []
-        self.service_metric = {}
-        self.service_metric_count = {}
         self.metric_count = 0
         #log.debug('host %s added' % self.name)
         
-    def addService(self, svc_name, svc_obj):
-        self.service_list.append(svc_obj)
-        perfdata = svc_obj.perfdata_available
-        
-    def addServiceMetric(self, service, metric=None):
+    def addServiceMetric(self, serviceName, metric=None):
         #log.debug('Adding service metric %s::%s to host %s' % (str(service), str(metric), self.name))
-        service = str(service)
+        serviceName = str(serviceName)
+        service = self.getServiceByName(serviceName)
         if metric:
             metric = str(metric)
-            self.metric_count += 1
-            if service in self.service_metric:
-                self.service_metric[service].append(metric)
-                self.service_metric_count[service] += 1
+            if service:
+                met = Metric(metric)
+                self.metric_count += 1
+                service.addChild(met)
             else:
-                self.service_metric[service] = [metric]
-                self.service_metric_count[service] = 1
+                log.debug('adding a metric without service So skipping Metric %s')
         else:
-            if service in self.service_metric:
-                log.debug('adding a service metric that already exists')
-            else:
-                self.service_metric[service] = []
-                self.service_metric_count[service] = 0
+            if service:
+                log.debug('adding a service without metric so skipping')
                 
     def hasMetrics(self):
-        return len(self.service_metric)
+        return self.metric_count!=0;
     
     def getMetricCount(self):
         return self.metric_count
     
-    def getServiceList(self):
-        log.debug('grabbing services from service dictionary: %s' % len(self.service_metric))
-        service_list = []
-        for service in self.service_metric.keys():
-            if self.service_metric_count[service]:
-                log.debug('appending %s to service list' % service)
-                service_list.append(service)
-            else:
-                log.debug('service %s has no metrics - not appending to list' % service)
-        return service_list
-    
     def getMetricList(self, req_service):
         log.debug('grabbing metrics for service %s' % req_service)
         metric_list = []
-        for metric in self.service_metric[req_service]:
+        for child in self.children:
             log.debug('appending %s to metric list' % metric)
-            metric_list.append(metric)
+            metric_list.extend(child.getMetricList())
         return metric_list
+
+    def getServiceList(self):
+        return self.children.keys()
+    def getServiceByName(self, name):
+        return self.children.get(name, None)
     
-class service(object):
+class Service(Node):
     
     def __init__(self,
                  current_check_attempt,
@@ -431,12 +444,12 @@ class service(object):
                  state_duration,
                  unhandled,
                  host):
+        Node.__init__(self, name, "Service")
         self.current_check_attempt = current_check_attempt
         self.downtime = downtime
         self.last_check = last_check
         self.markdown = markdown
         self.max_check_attempts = max_check_attempts
-        self.name = name
         self.output = output
         self.perfdata_available = perfdata_available
         self.service_object_id = service_object_id
@@ -445,14 +458,17 @@ class service(object):
         self.state_duration = state_duration
         self.unhandled = unhandled
         self.host = host
-        
-class metric(object):
-    
+
+    def getMetricList(self):
+        metric_list = []
+        for child in self.children.values():
+            metric_list.append(child.name)
+        return metric_list
+
+class Metric(Node):
     # we cache data for a metric here
-    
-    def __init__(self,
-                 name):
-        self.name = name
+    def __init__(self, name):
+        Node.__init__(self, name, "Metric")
         self.data = {}
         self.touched = int(time.time()) 
     
@@ -471,7 +487,48 @@ def saveVersionInfo(result, node):
         api = result['api_version']
     node.setVersions(easyxdm, api_min, api)
     node.initialize()
-    
+
+def search(domainlist, dpattern=None, hpattern=None, spattern=None, mpattern=None):
+    returnList = {}
+    if not dpattern:
+        dpattern= "" 
+    if not hpattern:
+        hpattern= "" 
+    if not spattern:
+        spattern= "" 
+    if not mpattern:
+        mpattern= "" 
+    dpat = re.compile(dpattern, re.I)
+
+    for key in node_list:
+        hList = {}
+        if dpat.search(key):
+            hList = node_list[key].searchChildren(hpattern)
+        for i,j in hList.items():
+            sList = j.searchChildren(spattern)
+            for a,b in sList.items():
+                mList = b.searchChildren(mpattern)
+                if len(mList):
+                    #found something to return
+                    # find if the node exists in return list
+                    node = returnList.get(key, None)
+                    if not node:
+                        node = {}
+                        returnList[key] = node
+                    # get the host from this list
+                    host = node.get(i, None)
+                    if not host:
+                        host = {}
+                        node[i] = host
+                    # get the service from this list 
+                    service = host.get(a, None)
+                    if not service:
+                        service = {}
+                        host[a] = service
+                    for x,y in mList.items():
+                        service[x] = y
+    return returnList
+
 def errInfo(reason):
     log.error(reason)
     
@@ -484,7 +541,7 @@ for section in cfg_sections:
         server_tkt_shared = utils.config.get(section, "shared_secret")
         server_api_tool = utils.config.get(section, "api_tool")
         server_rescan = utils.config.get(section, "rescan")
-        node = opsview_node(server_name, server_host, server_login, server_password, server_tkt_shared, server_api_tool, server_rescan)
+        node = Domain(server_name, server_host, server_login, server_password, server_tkt_shared, server_api_tool, server_rescan)
         node_list[server_name] = node
         node_uri = node_list[server_name].getUri()
         node_versions = rest_api.getInfo(node_uri, 'rest')

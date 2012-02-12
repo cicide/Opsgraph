@@ -1,7 +1,8 @@
 #!/usr/bin/python
 
 from twisted.internet import defer
-import json, time, datetime
+from twisted.internet.task import LoopingCall
+import json, time, datetime, re
 import utils, opsview, txdbinterface, graph
 
 log = utils.get_logger("SubscriberService")
@@ -20,7 +21,12 @@ def_dur_unit = utils.config.get('graph', 'duration_unit')
 #   which means the start time of the event will be set to the first data point after the start of the event
 #   and the end time of the event will be set to the last data point before the end of the event
 
+# if the subscriber doesn't do anything for x seconds, log them out
+login_timeout = 600
+
+# re-authenticate to opsview once an hour
 reauth_timeout = 3600
+
 event_display = 'inclusive'
 event_display_options = ['None', 'All', 'Events', 'Outages']
 generalEventTypes = ['Outages', 'Events']
@@ -52,7 +58,7 @@ graph_privacy['Private'] = 2
 subscribers = {}
 
 class subscriber(object):
-    
+
     def __init__(self, username, password):
         self.username = username
         self.password = password
@@ -60,28 +66,119 @@ class subscriber(object):
         self.authed = False
         self.auth_count = 0
         self.auth_tkt = None
-        self.web_session = None
+        self.web_session = None # this is the opsview web session, not the user's web session
+        self.webSession = None # this is the users web session
         self.currentChart = None # describes a the current chart being edited 
         self.dbId = None
         self.chartList = []
+        self.livePageList = []
+        self._touchTime = int(time.time())
+        self.timeoutChecker = LoopingCall(self._checkTimeout)
+        self.timeoutChecker.start(5)
         d = txdbinterface.getUserData(self.username)
         d.addCallbacks(self.setDbId,self.onFailure)
         log.debug('subscriber %s added' % self.username)
         
+    def onFailure(self, reason):
+        log.error(reason)
+
+    def _checkTimeout(self):
+        currentTime = int(time.time())
+        if (currentTime - self._touchTime) > login_timeout:
+            log.info('%s logged out due to user timeout' % self.username)
+            self.timeoutChecker.stop()
+            self.logout()
+        
+    def logout(self):
+        def onAllQuit(result):
+            log.debug('all live elements closed')
+            if self.webSession:
+                try:
+                    self.webSession.expire()
+                except:
+                    pass
+                self.webSession = None
+                tmp = subscribers.pop(self.username, None)
+                return True
+        def onQuit(result):
+            log.debug('closed a live element')
+            return True
+        self.password = ''
+        self.auth_node_list = {}
+        self.authed = False
+        self.selected_host = None
+        # contact any live pages and force them to go away
+        element = None
+        dl = []
+        if len(self.livePageList):
+            while len(self.livePageList):
+                element = self.livePageList.pop()
+                d = element.pageQuit()
+                d.addCallbacks(onQuit,onQuit)
+                dl.append(d)
+            d = defer.DeferredList(dl, consumeErrors=True)
+            d.addCallbacks(onAllQuit,onAllQuit)
+            return d
+        else:
+            return True
+
+    def registerAvatarLogout(self, webSession):
+        self.webSession = webSession
+        
+    def registerLiveElement(self, liveElement):
+        if liveElement not in self.livePageList:
+            self.livePageList.append(liveElement)
+    
+    def unregisterLiveElement(self, liveElement):
+        if liveElement in self.livePageList:
+            tmp = self.livePageList.remove(liveElement)
+        
+    def isAuthed(self):
+        return self.authed
+
+    def checkCredentials(self, selected_node):
+        def onSuccess(result):
+            log.debug('result: %s' % result)
+            return result
+        def onFailure(reason):
+            log.error(reason)
+            return False
+        creds = {'X-Opsview-Username': self.username, 'X-Opsview-Token': token}
+        token, cred_time = self.auth_node_list[selected_node]
+        if (int(time.time()) - cred_time) > 50:
+            d = self.authenticateNode(selected_node)
+            d.addCallback(onSuccess).addErrback(onFailure)
+            return d
+        else:
+            return True        
+        
+    def _setTouchTime_decorator(target_function):
+
+        def wrapper(self, *args, **kwargs):
+            lastTouched = int(time.time() - self._touchTime)
+            self._touchTime = int(time.time())
+            return target_function(self, *args, **kwargs)
+        return wrapper
+
+    @_setTouchTime_decorator
     def getDbId(self):
         return self.dbId
     
+    @_setTouchTime_decorator
     def setCurrentChart(self, chart):
         self.currentChart = chart
-        
+
+    @_setTouchTime_decorator
     def editGraphInit(self):
         if not self.currentChart:
             self.currentChart = graph.chart(self)
         return self.currentChart
     
+    @_setTouchTime_decorator
     def editSuiteInit(self, member_list):
         return graph.suite(self.dbId, members=member_list)
     
+    @_setTouchTime_decorator
     def loadSuite(self, dbId, perms='ro'):
         log.debug(graph.suites)
         if int(dbId) in graph.suites:
@@ -92,28 +189,36 @@ class subscriber(object):
         else:
             return graph.suite(self.dbId, dbId=dbId, perms=perms)
     
+    @_setTouchTime_decorator
     def getSuiteMemberList(self, suite):
         log.debug('getting suite member list')
         return suite.getMemberList()
     
+    @_setTouchTime_decorator
     def getSuiteColumns(self, suite):
         return suite.getColumns()
     
+    @_setTouchTime_decorator
     def setSuiteColumns(self, suite, numcols):
         suite.setColumns(numcols)
         
+    @_setTouchTime_decorator
     def getSuitePermissions(self, suite):
         return suite.getPermissions(self.dbId)
     
+    @_setTouchTime_decorator
     def applySuiteOverrides(self, suite):
         return suite.applyOverrides(self)
     
+    @_setTouchTime_decorator
     def saveSuite(self, suiteList, suite):
         return suite.saveSuite(suiteList)
     
+    @_setTouchTime_decorator
     def addSuiteGraph(self, suite, chart, chart_id):
         suite.addGraphReference(chart, chart_id, self)
     
+    @_setTouchTime_decorator
     def getSavedSuiteList(self):
         def onSuccess(result):
             suite_list = []
@@ -132,6 +237,7 @@ class subscriber(object):
         d.addCallbacks(onSuccess,onFailure)
         return d
     
+    @_setTouchTime_decorator
     def initializeGraphPage(self, chart):
         if not chart:
             self.currentChart = graph.chart(self)
@@ -141,9 +247,7 @@ class subscriber(object):
         else:
             return (chart.getSeriesHsmList(), chart.getChartObject())
 
-    def onFailure(self, reason):
-        log.error(reason)
-        
+    @_setTouchTime_decorator
     def getEventTypeList(self, chart):
         possibleEventTypes = opsview.event_type_list[:]
         event_types = ['All', 'None']
@@ -156,26 +260,20 @@ class subscriber(object):
         chart.setEventTypeList(event_types)
         return chart.getEventTypeList()
     
+    @_setTouchTime_decorator
     def getSelectedEventType(self, chart):
         return chart.getEventsDisplay()
     
+    @_setTouchTime_decorator
     def setDbId(self, result):
         log.debug('got db id %s' % result)
         self.dbId = result
         
+    @_setTouchTime_decorator
     def getDbId(self):
         return self.dbId
     
-    def logout(self):
-        self.password = ''
-        self.auth_node_list = {}
-        self.authed = False
-        self.selected_host = None
-        return True
-    
-    def isAuthed(self):
-        return self.authed
-    
+    @_setTouchTime_decorator
     def authenticateNode(self, auth_node):
         def onLogin(result, auth_node):
             if result:
@@ -211,6 +309,7 @@ class subscriber(object):
             login_result = opsview.node_list[auth_node].loginUser(self.username, self.password)
         return login_result.addCallback(onLogin, auth_node).addErrback(onError)
         
+    @_setTouchTime_decorator
     def authenticateNodes(self):
         def onSuccess(result):
             log.debug('returning login request result: %s' % self.authed)
@@ -240,9 +339,11 @@ class subscriber(object):
         d.addCallbacks(onSuccess,onFailure)
         return d
     
+    @_setTouchTime_decorator
     def getUserName(self):
         return self.username
     
+    @_setTouchTime_decorator
     def getAuthNodes(self):
         node_list = []
         log.debug('found auth list of length %s' % len(self.auth_node_list))
@@ -250,33 +351,42 @@ class subscriber(object):
             node_list.append(node)
         log.debug('returning node list of length %s' % len(node_list))
         return node_list
+    
+    @_setTouchTime_decorator
     def getPreviousSeries(self, chart):
         return chart.getPreviousSeries()
     
+    @_setTouchTime_decorator
     def resetPreviousSeries(self, chart):
         return chart.resetPreviousSeries()
     
+    @_setTouchTime_decorator
     def getHostList(self, selected_node, chart):
         chart.setSelectedNode(str(selected_node))
         host_list = opsview.node_list[chart.getSelectedNode()].getHostList()
         host_list.sort()
         return host_list
-        
-    
+
+    @_setTouchTime_decorator
     def getServiceList(self, selected_host, chart):
         chart.setSelectedHost(str(selected_host))
-        service_list = opsview.host_list[chart.getSelectedHost()].getServiceList()
+        domain = opsview.node_list[chart.getSelectedNode()]
+        host = domain.getHostByName(chart.getSelectedHost())
+        service_list = host.getServiceList()
         service_list.sort()
         return service_list
+
     
-    
-    
+    @_setTouchTime_decorator
     def getMetricList(self, selected_service, chart):
         chart.setSelectedService(str(selected_service))
-        metric_list = opsview.host_list[chart.getSelectedHost()].getMetricList(selected_service)
+        domain = opsview.node_list[chart.getSelectedNode()]
+        host = domain.getHostByName(chart.getSelectedHost())
+        service = host.getServiceByName(str(selected_service))
+        metric_list = service.getMetricList()
         new_metric_list = []
         for metric in metric_list:
-            metric_series = [chart.getSelectedNode(), 
+            metric_series = [chart.getSelectedNode(),
                              chart.getSelectedHost(),
                              chart.getSelectedService(),
                              metric]
@@ -289,16 +399,58 @@ class subscriber(object):
         new_metric_list.sort()
         return new_metric_list
 
+    @_setTouchTime_decorator
     def setMetric(self, selected_metric, chart):
         chart.setSelectedMetric(str(selected_metric))
         
+    @_setTouchTime_decorator
+    def setRegexp(self, chart, keyP, patt):
+        if patt == '*':
+            patt = '.*'
+        try:
+            tmp = re.compile(patt, re.I)
+        except:
+            return False
+        chart.setRegexp(keyP, patt)
+        return self.getRegexpMatchCount(chart)
+        
+    @_setTouchTime_decorator
+    def getRegexpMatchCount(self, chart):
+        tmp = chart.getRegexp()
+        dPatt, hPatt, sPatt, mPatt = tmp
+        regexpMatch = opsview.search(opsview.node_list, dPatt, hPatt, sPatt, mPatt)
+        dhsmList = self.getDhsmListFromDict(chart, regexpMatch)
+        return (len(dhsmList),dhsmList[:])
+    
+    def getDhsmListFromDict(self, chart, domainDict):
+        dhsmList = []
+        selectedDhsm = chart.getMetricSeries()[:]
+        for node in domainDict:
+            for host in domainDict[node]:
+                for service in domainDict[node][host]:
+                    for metric in domainDict[node][host][service]:
+                        tmpDhsm = [node, host, service, metric]
+                        if tmpDhsm not in selectedDhsm:
+                            dhsmList.append(tmpDhsm)
+        return dhsmList[:]
+            
+    def addRegexpSelect(self, chart):
+        dhsmCount, dhsm = self.getRegexpMatchCount(chart)
+        dhsmIndexedList = []
+        for row in dhsm:
+            dhsmIndexed = chart.addUniqueSeries(row[:])
+            dhsmIndexedList.append(dhsmIndexed)
+        return dhsmIndexedList
+            
+    @_setTouchTime_decorator
     def addGraphSeries(self, chart):
         return chart.getCurrentSeries()
-        
-        
+
+    @_setTouchTime_decorator
     def cancelSeriesId(self, series_id, chart):
         return chart.cancelSeriesId(series_id)
     
+    @_setTouchTime_decorator
     def getEventList(self, time_values, chart):
         log.debug('starting events building')
         chart.setEventList([])
@@ -373,6 +525,7 @@ class subscriber(object):
             events[unicode('line')].append(evnt_record)
         return events
 
+    @_setTouchTime_decorator
     def buildMultiSeriesTimeObject(self, chart, chart_cell, data={}):
         if data:
             time_values, data_series = chart.getTimeValues(data)
@@ -393,6 +546,7 @@ class subscriber(object):
         else:
             return {}
 
+    @_setTouchTime_decorator
     def makeGraph(self, chart):
         def onTotalSuccess(result):
             log.debug('got all results!')
@@ -429,37 +583,27 @@ class subscriber(object):
         return d
         
 
+    @_setTouchTime_decorator
     def saveGraph(self, chart):
         return chart.saveGraph()
 
+    @_setTouchTime_decorator
     def deleteGraphs(self, graphList):
         return txdbinterface.deleteGraphs(graphList)
-    
-    def checkCredentials(self, selected_node):
-        def onSuccess(result):
-            log.debug('result: %s' % result)
-            return result
-        def onFailure(reason):
-            log.error(reason)
-            return False
-        creds = {'X-Opsview-Username': self.username, 'X-Opsview-Token': token}
-        token, cred_time = self.auth_node_list[selected_node]
-        if (int(time.time()) - cred_time) > 50:
-            d = self.authenticateNode(selected_node)
-            d.addCallback(onSuccess).addErrback(onFailure)
-            return d
-        else:
-            return True
 
+    @_setTouchTime_decorator
     def getGraphEngineList(self):
         return graph_engines[:]
     
+    @_setTouchTime_decorator
     def getGraphEngine(self, chart):
         return chart.getChartEngine()
     
+    @_setTouchTime_decorator
     def getGraphType(self, chart):
         return chart.getChartType()
     
+    @_setTouchTime_decorator
     def setGraphEngine(self, engine, chart):
         chart_engine = str(engine)
         chart.setChartEngine(chart_engine)
@@ -469,9 +613,8 @@ class subscriber(object):
             return graph_types[chart_engine].copy()
         else:
             return []
-    
-    
-    
+
+    @_setTouchTime_decorator
     def setGraphType(self, graph_type, chart):
         avail_types = graph_types[chart.getChartEngine()]
         if graph_type not in avail_types:
@@ -480,6 +623,7 @@ class subscriber(object):
             chart.setChartType(graph_type)
             return True
 
+    @_setTouchTime_decorator
     def getGraphSettings(self, chart):
         graph_settings = {}
         graph_settings['graph_type'] = graph_types[chart.getChartEngine()][chart.getChartType()]
@@ -487,18 +631,23 @@ class subscriber(object):
         graph_settings['graph_height'] = chart.getChartHeight()
         return graph_settings
 
+    @_setTouchTime_decorator
     def getGraphSizes(self):
         return graph_size
     
+    @_setTouchTime_decorator
     def getGraphName(self, chart):
         return chart.getChartName()
     
+    @_setTouchTime_decorator
     def getGraphTitle(self, chart):
         return chart.getChartTitle()
     
+    @_setTouchTime_decorator
     def getGraphSize(self, chart):
         return chart.getChartSize()
     
+    @_setTouchTime_decorator
     def getGraphStartTime(self, chart):
         if chart.getChartStart() == 'Now':
             start_time = int(time.time())
@@ -507,16 +656,20 @@ class subscriber(object):
         date_time_object = datetime.datetime.fromtimestamp(start_time)
         return date_time_object.strftime("%m/%d/%Y %H:%M")
     
+    @_setTouchTime_decorator
     def getGraphDuration(self, chart):
         dur = '%s%s%s' % (chart.getChartDurationModifier(),chart.getChartDurationLength(),chart.getChartDurationUnit())
         return dur
     
+    @_setTouchTime_decorator
     def setGraphName(self, graph_name, chart):
         return chart.setChartName(graph_name)
         
+    @_setTouchTime_decorator
     def setGraphTitle(self, graph_title, chart):
         return chart.setChartTitle(graph_title)
     
+    @_setTouchTime_decorator
     def setGraphSize(self, size, chart):
         if size in graph_size:
             width, height = graph_size[size]
@@ -524,6 +677,7 @@ class subscriber(object):
         else:
             return False
     
+    @_setTouchTime_decorator
     def setGraphDuration(self, duration, chart):
         if len(duration) == 0:
             # missing duration, flag an error
@@ -555,6 +709,7 @@ class subscriber(object):
         chart.setChartDurationModifier(dur_mod)
         return [str(dur_len), dur_units, dur_mod]
     
+    @_setTouchTime_decorator
     def setGraphStartTime(self, date_time, chart):
         if type(date_time) == float:
             chart.setChartStart(date_time)
@@ -577,6 +732,7 @@ class subscriber(object):
             chart.setChartStart(start_time)
         return True
     
+    @_setTouchTime_decorator
     def setGraphPrivacy(self, privacy, chart):
         if privacy not in graph_privacy:
             return False
@@ -584,12 +740,15 @@ class subscriber(object):
             chart.setChartPrivacy(privacy)
             return true
         
+    @_setTouchTime_decorator
     def getGraphPrivacy(self, chart):
         return chart.getChartPrivacy()
     
+    @_setTouchTime_decorator
     def getGraphPrivacies(self):
         return graph_privacy.copy()
     
+    @_setTouchTime_decorator
     def setGraphEventType(self, e_type, chart):
         chart.setChartEventsDisplay(e_type)
         log.debug('event display set to %s' % e_type)
@@ -601,6 +760,7 @@ class subscriber(object):
             chart.setChartEventsDisplayList([e_type])
         log.debug('displaying events: %s' % chart.getChartEventsDisplayList())
         
+    @_setTouchTime_decorator
     def getSavedGraphList(self):
         def onSuccess(result):
             log.debug(result)
@@ -619,6 +779,7 @@ class subscriber(object):
         d.addCallbacks(onSuccess,onFailure)
         return d
     
+    @_setTouchTime_decorator
     def loadGraph(self, dbId):
         def onCompleteSuccess(result):
             log.debug('graph completely loaded!')
@@ -666,6 +827,7 @@ class subscriber(object):
         d.addCallbacks(onCompleteSuccess,onFailure)
         return d
 
+    @_setTouchTime_decorator
     def returnToLastChart(self):
         if len(self.chartList):
             self.currentChart = self.chartList.pop()

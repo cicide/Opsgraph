@@ -135,6 +135,7 @@ LoadGraphs.LoadGraphWidget.methods(
     
     function reDirect(self, url) {
         window.location = url;
+        return true;
     },
     
     function onCreateSuite(self, formName, fieldName) {

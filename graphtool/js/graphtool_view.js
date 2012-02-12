@@ -125,5 +125,10 @@ ViewGraphs.ViewGraphWidget.methods(
         alert('resizing to '+theWidth+' x '+theHeight);
         highChart.setSize(theWidth,theHeight)
         highChart.redraw();
+    },
+    
+    function reDirect(self, url) {
+        window.location = url;
+        return true;
     }
 );
