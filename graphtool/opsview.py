@@ -490,7 +490,6 @@ def saveVersionInfo(result, node):
 
 def search(domainlist, dpattern=None, hpattern=None, spattern=None, mpattern=None):
     returnList = {}
-    returnTuple = []
     if not dpattern:
         dpattern= "" 
     if not hpattern:
@@ -528,8 +527,7 @@ def search(domainlist, dpattern=None, hpattern=None, spattern=None, mpattern=Non
                         host[a] = service
                     for x,y in mList.items():
                         service[x] = y
-                    returnTuple.append((key, i, a, x))
-    return returnList, returnTuple
+    return returnList
 
 def errInfo(reason):
     log.error(reason)

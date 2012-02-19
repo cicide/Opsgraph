@@ -562,9 +562,11 @@ class subscriber(object):
         log.debug('graphing the following series: %s' % chart.getSeries())
         for row in chart.getSeries():
             log.debug('trying to grab four items from %s' % chart.getSeriesTracker(row))
+            log.debug('subscribers auth_list is %s' % self.auth_node_list)
             data_node, host, service, metric = chart.getSeriesTracker(row)
             cred_token, cred_time = self.auth_node_list[data_node]
             if int(time.time()) > int(cred_time + reauth_timeout):
+                # this is not the correct way to re-auth....  we need to re-authenticate and then recall this function
                 d = self.authenticateNode(data_node)
                 log.debug('re-authentication requested')
                 ds.append(d)

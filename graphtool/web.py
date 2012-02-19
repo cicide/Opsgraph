@@ -182,7 +182,7 @@ class RootPage(rend.Page):
         return LoadSuitePage()
     
     def child_createSuite(self, ctx):
-        return LoadGraphPage()
+        return ViewSuitesPage()
     
     child_css = static.File('css')
     child_images = static.File('image')
