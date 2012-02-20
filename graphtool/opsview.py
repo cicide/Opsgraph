@@ -2,7 +2,7 @@
 
 from twisted.names import client as dns_client
 from twisted.web import client as web_client
-from twisted.internet import defer
+from twisted.internet import defer, reactor
 from paste.auth import auth_tkt
 
 import json, time, datetime, urllib
@@ -14,8 +14,8 @@ cfg_sections = utils.config.sections()
 
 graph_duration = '%s%s' % (utils.config.get('graph', 'duration_length'), utils.config.get('graph', 'duration_unit'))
 local_ip = utils.config.get('general', 'local_ip')
-event_full_load_period = utils.config.get('events', 'full_load_period')
-event_inc_load_period = utils.config.get('events', 'incremental_load_period')
+event_full_load_period = int(utils.config.get('events', 'full_load_period'))
+event_inc_load_period = int(utils.config.get('events', 'incremental_load_period'))
 
 node_list = {}
 event_type_list = ['outage', 'event']
@@ -70,6 +70,7 @@ class Domain(Node):
         self.do_dns_lookup(self.host)
         self.event_type_list = []
         self.eventList = []
+        self.rescan_sched = 0
         self.loadEvents()
         
     def loadEvents(self):
@@ -109,9 +110,15 @@ class Domain(Node):
             log.debug('Parsed event list for node %s: %s' % (self.name, event_list))
         def onCompleteSuccess(result):
             log.debug('Got Complete result for Node %s: ' % self.name)
-            log.debug(result)
+            #log.debug(result)
+            #schedule the next full event load for the event timeout
+            log.debug("scheduling an event rescan for %s in %i seconds" % (self.host, event_full_load_period))
+            reactor.callLater(event_full_load_period, self.loadEvents)
         def onFailure(reason):
             log.error(reason)
+        def onCompleteFailure(reason):
+            # we got an error loading events, reschedule a new event load in one minute
+            reactor.callLater(60, self.loadEvents)
         ds = []
         d1 = txdbinterface.getEventTypes()
         d1.addCallbacks(onTypeSuccess,onFailure)
@@ -120,7 +127,7 @@ class Domain(Node):
         d2.addCallbacks(onEventsSuccess,onFailure)
         ds.append(d2)
         d = defer.DeferredList(ds, consumeErrors=False)
-        d.addCallbacks(onCompleteSuccess,onFailure)
+        d.addCallbacks(onCompleteSuccess,onCompleteFailure)
         
     def getHostList(self):
         host_list = []
@@ -217,6 +224,7 @@ class Domain(Node):
         return d
     
     def initialize(self, result=None):
+        self.rescan_sched = 0
         # if we don't have a token, we need to get one
         if not self.masterLoginToken:
             log.info('Initializing opsview node %s' % self.name)
@@ -249,12 +257,34 @@ class Domain(Node):
                 log.info('Found %i graphable metrics for domain %s' % (len(host_metric_list), self.name))
                 log.info('Domain initialization for domain %s complete' % self.name)
                 self.initialized = True
-                return 1
+                #schedule a rescan based on the rescan timer
+                if not self.rescan_sched:
+                    log.debug('scheduling a node rescan in %i seconds' % self.rescan)
+                    reactor.callLater(self.rescan, self.initialize)
+                    self.rescan_sched = int(time.time()) + self.rescan
+                else:
+                    log.debug('a rescan is already scheduled for this node in %i seconds' % rescan_time)
+                    rescan_time = self.rescan_sched - int(time.time())
+                return True
             else:
-                return 0
+                if self.rescan_sched:
+                    if (self.rescan_sched - int(time.time())) > 120:
+                        log.debug('initialize failed, scheduling a rescan for in one minute')
+                        reactor.callLater(60, self.initialize)
+                        self.rescan_sched = int(time.time()) + 60
+                    else:
+                        log.debug('initialize failed, rescan already scheduled within the next two minutes')
+                return False
         else:
             log.debug('No result')
-            return 0
+            if self.rescan_sched:
+                if (self.rescan_sched - int(time.time())) > 120:
+                    log.debug('initialize failed, scheduling a rescan for in one minute')
+                    reactor.callLater(60, self.initialize)
+                    self.rescan_sched = int(time.time()) + 60
+                else:
+                    log.debug('initialize failed, rescan already scheduled within the next two minutes')
+            return False
             
     def addServices(self, result=None):
         self.cred_time = int(time.time())
@@ -266,6 +296,10 @@ class Domain(Node):
             service_list = services['list']
             service_sum = services['summary']
             host_count = 0
+            #remove the old children set
+            log.debug("Reloading Domain %s" % self.host)
+            self.initialized = False
+            self.children = {}
             for item in service_list:
                 host_count += 1
                 item_services = item['services']
@@ -320,7 +354,7 @@ class Domain(Node):
             log.info('found %s hosts for node %s' % (host_count, self.name))
             perfmetrics = rest_api.getInfo(self.uri, 'rest/runtime/performancemetric', headers=self.creds)
             perfmetrics.addCallbacks(self.saveMetricData,self.onErr)
-            return 1
+            return perfmetrics
                 
     def getName(self):
         return self.name
@@ -342,7 +376,6 @@ class Domain(Node):
             end_time = int(time.time())
         if len(creds) == 0:
             creds = self.creds
-        #url = '%s?hsm=%s&end_time=%s&duration=%s' % (api_tool, urllib.quote_plus(uri), end_time, duration)
         url = '%s?hsm=%s&end=%s&duration=%s' % (self.api_tool, urllib.quote_plus(uri), end_time, duration)
         log.debug('requesting %s from %s' % (url, self.uri))
         d = rest_api.getInfo(self.uri, str(url), headers=creds, cookies=cookies)
