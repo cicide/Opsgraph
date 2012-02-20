@@ -25,7 +25,7 @@ def_dur_unit = utils.config.get('graph', 'duration_unit')
 login_timeout = 600
 
 # re-authenticate to opsview once an hour
-reauth_timeout = 3600
+reauth_timeout = 120
 
 event_display = 'inclusive'
 event_display_options = ['None', 'All', 'Events', 'Outages']
@@ -546,6 +546,10 @@ class subscriber(object):
         else:
             return {}
 
+    def _makeGraph(self, result, chart):
+        """ called from makeGraph when authentication has failed during a graph build"""
+        return self.makeGraph(chart)
+
     @_setTouchTime_decorator
     def makeGraph(self, chart):
         def onTotalSuccess(result):
@@ -566,10 +570,11 @@ class subscriber(object):
             data_node, host, service, metric = chart.getSeriesTracker(row)
             cred_token, cred_time = self.auth_node_list[data_node]
             if int(time.time()) > int(cred_time + reauth_timeout):
-                # this is not the correct way to re-auth....  we need to re-authenticate and then recall this function
+                # if we have exceeded our auth time, force a re-authentication.
                 d = self.authenticateNode(data_node)
                 log.debug('re-authentication requested')
-                ds.append(d)
+                d.addCallback(self._makeGraph,chart).addErrback(self.onFailure)
+                return d
             if data_node not in chart.getDataNodes():
                 chart.addDataNode(data_node)
             creds = {'X-Opsview-Username': self.username, 'X-Opsview-Token': self.auth_node_list[data_node][0]}
