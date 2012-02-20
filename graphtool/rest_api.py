@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
-from twisted.web import client
+from twisted.web import client, error as weberror
+from twisted.internet import error as interror
 from twisted.application import internet
 import urllib, json
 import utils
@@ -27,14 +28,16 @@ class RestResource(object):
         return self._sendRequest('DELETE')
 
     def _sendRequest(self, method, headers, cookies, data="", mimeType=None):
-        #headers = {}
         headers['Accept'] = 'application/json'
         if mimeType:
             headers['Content-Type'] = mimeType
         if data:
             headers['Content-Length'] = str(len(data))
-        return client.getPage(
-            self.uri, method=method, postdata=data, headers=headers, cookies=cookies)
+        return client.getPage(self.uri, 
+                              method=method, 
+                              postdata=data, 
+                              headers=headers, 
+                              cookies=cookies)
 
 class dataFetcher(object):
     
@@ -61,11 +64,27 @@ class dataFetcher(object):
         return reply
         
     def onError(self, reason, uri=None, *a, **kw):
-        log.error('Error during uri request: %s - %s' % (uri,reason))
-        log.debug('a: %s' % a)
-        log.debug('kw: %s' % kw)
-        
+        l = reason.trap(weberror.Error,
+                    interror.NoRouteError,
+                    interror.ConnectError,
+                    interror.ConnectionRefusedError,
+                    interror.TimeoutError,
+                    interror.SSLError,
+                    interror.ConnectionLost
+                    )
+        if l == interror.NoRouteError:
+            log.error("Login Error: No route to host")
+        elif l == interror.ConnectError:
+            log.error("Connection Error")
+        else:
+            log.error('Bind Error during uri request: %s - %s' % (uri,reason))
+        raise LoginError
 
+class LoginError(Exception):
+    """ Error received while attempting remote Opsview Login """
+    def __repr__(self):
+        return 'LoginError'
+    
 def getInfo(srv_uri, req_uri, headers={}, cookies={}):
     rest_uri = req_uri
     rester = dataFetcher(srv_uri, rest_uri)

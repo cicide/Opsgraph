@@ -125,7 +125,7 @@ class Domain(Node):
     def getHostList(self):
         host_list = []
         for i in self.children:
-           host_list.append(i)
+            host_list.append(i)
         return host_list
 
     def getEvents(self):
@@ -202,7 +202,11 @@ class Domain(Node):
                 log.debug('user logged in with token %s' % token)
                 return (token, cred_time, cj)
         def onFail(reason):
-            log.error(reason)
+            l = reason.trap(rest_api.LoginError)
+            if l == rest_api.LoginError:
+                pass
+            else:
+                log.error(reason)
             return False
         cj = {}
         cj['auth_tkt'] = self._makeTicket(userid=username, remote_addr=local_ip)
