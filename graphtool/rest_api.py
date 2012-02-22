@@ -1,8 +1,12 @@
 #!/usr/bin/python
 
 from twisted.web import client, error as weberror
-from twisted.internet import error as interror
+from twisted.web.client import Agent
+from twisted.web.http_headers import Headers
+from twisted.web.iweb import IBodyProducer
+from twisted.internet import defer, reactor, error as interror
 from twisted.application import internet
+from zope.interface import implements
 import urllib, json
 import utils
 
@@ -12,6 +16,11 @@ class RestResource(object):
     
     def __init__(self, uri):
         self.uri = uri
+        self.agent = Agent(reactor)
+        
+    def onGetFail(self, reason):
+        log.error(reason)
+        return False
         
     def get(self, headers, cookies):
         return self._sendRequest('GET', headers=headers, cookies=cookies)
@@ -44,18 +53,25 @@ class dataFetcher(object):
     def __init__(self, srv_uri, rest_uri):
         self.srv_uri = srv_uri
         self.rest_uri = rest_uri
+    
+    def timeOutPass(result):
+        return result
         
     def getData(self, headers, cookies):
         uri = '%s/%s' % (self.srv_uri, self.rest_uri)
         d = RestResource(uri)
         log.debug('requesting %s with headers: %s and cookies: %s' % (uri, headers, cookies))
-        return d.get(headers, cookies).addCallback(self.onResult).addErrback(self.onError)
+        x = d.get(headers, cookies)
+        dc = reactor.callLater(10, x.cancel)
+        return x.addBoth(self.timeOutPass).addCallback(self.onResult).addErrback(self.onError)
     
     def postData(self, postData, headers, cookies):
         uri = '%s/%s' % (self.srv_uri, self.rest_uri)
         d = RestResource(uri)
         log.debug('posting to %s' % uri)
-        return d.post(postData, headers, cookies).addCallback(self.onResult).addErrback(self.onError, uri)
+        x = d.post(postData, headers, cookies)
+        dc = reactor.callLater(10, x.cancel)
+        return x.addBoth(self.timeOutPass).addCallback(self.onResult).addErrback(self.onError, uri)
     
     def onResult(self, result):
         log.debug('Got Result!')
