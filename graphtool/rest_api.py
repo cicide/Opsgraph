@@ -1,12 +1,8 @@
 #!/usr/bin/python
 
 from twisted.web import client, error as weberror
-from twisted.web.client import Agent
-from twisted.web.http_headers import Headers
-from twisted.web.iweb import IBodyProducer
 from twisted.internet import defer, reactor, error as interror
 from twisted.application import internet
-from zope.interface import implements
 import urllib, json
 import utils
 
