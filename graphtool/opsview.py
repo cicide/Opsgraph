@@ -19,6 +19,8 @@ event_inc_load_period = int(utils.config.get('events', 'incremental_load_period'
 
 node_list = {}
 event_type_list = ['outage', 'event']
+loginTimeout = 3
+dataTimeout = 10
 
 class Node(object):
     def __init__(self, name, type):
@@ -174,7 +176,7 @@ class Domain(Node):
         def onFail(reason):
             log.error(reason)
         postData = {'username': self.login, 'password': self.password}
-        d = rest_api.postData(self.uri, 'rest/login', postData)
+        d = rest_api.postData(self.uri, 'rest/login', postData, timeout=loginTimeout)
         d.addCallbacks(onSuccess,onFail)
         return d
     
@@ -218,7 +220,7 @@ class Domain(Node):
         cj = {}
         cj['auth_tkt'] = self._makeTicket(userid=username, remote_addr=local_ip)
         postData = {'username': username, 'password': password}
-        d = rest_api.postData(self.uri, 'rest/login', postData, headers={}, cookies=cj)
+        d = rest_api.postData(self.uri, 'rest/login', postData, headers={}, cookies=cj, timeout=loginTimeout)
         d.addCallbacks(onSuccess,onFail)
         #d.addBoth(get_auth_tkt)
         return d
@@ -232,7 +234,7 @@ class Domain(Node):
             return d.addCallback(self.initialize).addErrback(self.onErr)
         else:
             self.creds = {'X-Opsview-Username': self.login, 'X-Opsview-Token': self.masterLoginToken}
-            d = rest_api.getInfo(self.uri, 'rest/status/service', headers=self.creds)
+            d = rest_api.getInfo(self.uri, 'rest/status/service', headers=self.creds, timeout=loginTimeout)
             return d.addCallbacks(self.addServices,self.onErr)
             
     def getHostByName(self, name):
@@ -352,7 +354,7 @@ class Domain(Node):
                                       svc_host)
                     host.addChild(svc_obj)
             log.info('found %s hosts for node %s' % (host_count, self.name))
-            perfmetrics = rest_api.getInfo(self.uri, 'rest/runtime/performancemetric', headers=self.creds)
+            perfmetrics = rest_api.getInfo(self.uri, 'rest/runtime/performancemetric', headers=self.creds, timeout=dataTimeout)
             perfmetrics.addCallbacks(self.saveMetricData,self.onErr)
             return perfmetrics
                 
@@ -365,7 +367,7 @@ class Domain(Node):
     def getApi(self):
         return api_tool
     
-    def fetchData(self, uri, end_time=None, duration=None, creds={}, cookies={}):
+    def fetchData(self, uri, end_time=None, duration=None, creds={}, cookies={}, timeout=dataTimeout):
         def onSuccess(result):
             return result
         def onFailure(result):
@@ -378,7 +380,7 @@ class Domain(Node):
             creds = self.creds
         url = '%s?hsm=%s&end=%s&duration=%s' % (self.api_tool, urllib.quote_plus(uri), end_time, duration)
         log.debug('requesting %s from %s' % (url, self.uri))
-        d = rest_api.getInfo(self.uri, str(url), headers=creds, cookies=cookies)
+        d = rest_api.getInfo(self.uri, str(url), headers=creds, cookies=cookies, timeout=dataTimeout)
         return d.addCallbacks(onSuccess,onFailure)
 
     def _makeTicket(self, 
@@ -581,6 +583,6 @@ for section in cfg_sections:
         node = Domain(server_name, server_host, server_login, server_password, server_tkt_shared, server_api_tool, server_rescan)
         node_list[server_name] = node
         node_uri = node_list[server_name].getUri()
-        node_versions = rest_api.getInfo(node_uri, 'rest')
+        node_versions = rest_api.getInfo(node_uri, 'rest', timeout=dataTimeout)
         node_versions.addCallback(saveVersionInfo, node=node).addErrback(errInfo)
         node = None

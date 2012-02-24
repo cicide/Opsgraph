@@ -97,12 +97,12 @@ class LoginError(Exception):
     def __repr__(self):
         return 'LoginError'
     
-def getInfo(srv_uri, req_uri, headers={}, cookies={}):
+def getInfo(srv_uri, req_uri, headers={}, cookies={}, timeout=10):
     rest_uri = req_uri
     rester = dataFetcher(srv_uri, rest_uri)
-    return rester.getData(headers, cookies)
+    return rester.getData(headers, cookies, timeout)
 
-def postData(srv_uri, req_uri, postData, headers={}, cookies={}):
+def postData(srv_uri, req_uri, postData, headers={}, cookies={}, timeout=10):
     rester = dataFetcher(srv_uri, req_uri)
-    return rester.postData(postData, headers, cookies)
+    return rester.postData(postData, headers, cookies, timeout)
     
