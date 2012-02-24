@@ -10,7 +10,7 @@ from twisted.cred.credentials import IUsernamePassword, IAnonymous
 from nevow import appserver, athena, loaders, rend, inevow, guard, inevow, url, static, tags as T
 from nevow.inevow import ISession, IRequest
 from nevow.athena import expose
-import random, os, time
+import random, os, time, string
 import utils, subscriber
 
 log = utils.get_logger("WEBService")
@@ -315,9 +315,10 @@ class ViewGraphsElement(athena.LiveElement):
             graph_type = graph_settings['graph_type']
             graph_width = graph_settings['graph_width']
             graph_height = graph_settings['graph_height']
-            #send the data back to the page for graphing - defChart needs to be replaced with a unique id
+            #TODO: send the new unique Id back to the subscriber so we have access to this chart (need for live chart)
+            defChart = getRandString(8)
             if chart.getChartEngine() == 'FusionCharts':
-                self.callRemote('addFusionChart', unicode(graph_type), unicode('defChart'), unicode('100%'), unicode('100%'), graph_object, unicode(chart_cell))
+                self.callRemote('addFusionChart', unicode(graph_type), unicode(defChart), unicode('100%'), unicode('100%'), graph_object, unicode(chart_cell))
             elif chart.getChartEngine() == 'HighCharts':
                 self.callRemote('addHighChart', graph_object)
             #self.subscriber.returnToLastChart()
@@ -1116,10 +1117,11 @@ class ExternalElement(athena.LiveElement):
             graph_width = graph_settings['graph_width']
             graph_height = graph_settings['graph_height']
             log.debug('graph settings returned')
-            #send the data back to the page for graphing - defChart needs to be replaced with a unique id
+            #TODO: send the new unique Id back to the subscriber so we have access to this chart (need for live chart)
+            defChart = getRandString(8)
             if self.chart.getChartEngine() == 'FusionCharts':
                 log.debug('sending object as fusionchart')
-                self.callRemote('addFusionChart', unicode(graph_type), unicode('defChart'), unicode(graph_width), unicode(graph_height), graph_object, unicode(chart_cell))
+                self.callRemote('addFusionChart', unicode(graph_type), unicode(defChart), unicode(graph_width), unicode(graph_height), graph_object, unicode(chart_cell))
             elif self.chart.getChartEngine() == 'HighCharts':
                 log.debug('sending object as highchart')
                 self.callRemote('addHighChart', graph_object)
@@ -1242,6 +1244,14 @@ class NotFoundPage(rend.Page):
         request.redirect('/')
         return ''
     
+
+def getRandString(length):
+    digs = string.digits
+    ltrs = string.letters
+    rndset = digs + ltrs
+    rndStr = "".join([random.choice(rndset) for i in xrange(length)])
+    return rndStr
+
 def wrapAuthorized(site):
     site = inevow.IResource(site)
     realmObject = opsviewRealm(site)
