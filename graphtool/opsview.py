@@ -19,8 +19,8 @@ event_inc_load_period = int(utils.config.get('events', 'incremental_load_period'
 
 node_list = {}
 event_type_list = ['outage', 'event']
-loginTimeout = 3
-dataTimeout = 10
+loginTimeout = 10
+dataTimeout = 20
 
 class Node(object):
     def __init__(self, name, type):
@@ -154,7 +154,7 @@ class Domain(Node):
         return d
         
     def onErr(self, reason):
-        log.debug(reason)
+        log.error(reason)
         
     def setVersions(self, easyxdm, api_min, api):
         self.easyxdm_version = easyxdm
@@ -197,7 +197,8 @@ class Domain(Node):
             headers = []
             cj['auth_tkt'] = self._makeTicket(userid=username, remote_addr=local_ip)
             log.debug('requesting web auth with ticket: %s' % cj)
-            d = web_client.getPage(self.uri,headers,method='GET',cookies=cj)
+            #d = web_client.getPage(self.uri, headers, method='GET', cookies=cj)
+            d = rest_api.getInfo(self.uri, '', headers, cookies=cj, timeout=loginTimeout)
             d.addCallback(onTktSuccess, token_result).addErrback(onTktFail, token_result)
             return d
         def onSuccess(result):
@@ -222,7 +223,6 @@ class Domain(Node):
         postData = {'username': username, 'password': password}
         d = rest_api.postData(self.uri, 'rest/login', postData, headers={}, cookies=cj, timeout=loginTimeout)
         d.addCallbacks(onSuccess,onFail)
-        #d.addBoth(get_auth_tkt)
         return d
     
     def initialize(self, result=None):
@@ -367,11 +367,26 @@ class Domain(Node):
     def getApi(self):
         return api_tool
     
-    def fetchData(self, uri, end_time=None, duration=None, creds={}, cookies={}, timeout=dataTimeout):
+    def fetchData(self, uri, end_time=None, duration=None, creds={}, cookies={}, timeout=dataTimeout, retry=0):
         def onSuccess(result):
             return result
-        def onFailure(result):
-            return result
+        def onFailure(result, uri=None, end_time=None, duration=None, creds=None, cookies=None, timeout=dataTimeout, retry=0):
+            #trap possible errors here
+            l = result.trap(rest_api.ApiError, defer.CancelledError)
+            if l == rest_api.ApiError:
+                retry += 1
+                if uri:
+                    if retry < 3:
+                        return self.fetchData(uri, end_time, duration, creds, cookies, timeout, retry)
+                    else:
+                        return result
+                else:
+                    return result
+            elif l == defer.CancelledError:
+                log.debug('got timeout error')
+            else:
+                log.debug('got error: %s' % result)
+                return result
         if not duration:
             duration = graph_duration
         if not end_time:
@@ -380,8 +395,8 @@ class Domain(Node):
             creds = self.creds
         url = '%s?hsm=%s&end=%s&duration=%s' % (self.api_tool, urllib.quote_plus(uri), end_time, duration)
         log.debug('requesting %s from %s' % (url, self.uri))
-        d = rest_api.getInfo(self.uri, str(url), headers=creds, cookies=cookies, timeout=dataTimeout)
-        return d.addCallbacks(onSuccess,onFailure)
+        d = rest_api.getInfo(self.uri, str(url), headers=creds, cookies=cookies, timeout=timeout)
+        return d.addCallback(onSuccess).addErrback(onFailure, uri, end_time, duration, creds, cookies, timeout, retry)
 
     def _makeTicket(self, 
                     userid='userid', 

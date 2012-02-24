@@ -12,7 +12,6 @@ class RestResource(object):
     
     def __init__(self, uri):
         self.uri = uri
-        self.agent = Agent(reactor)
         
     def onGetFail(self, reason):
         log.error(reason)
@@ -49,9 +48,26 @@ class dataFetcher(object):
     def __init__(self, srv_uri, rest_uri):
         self.srv_uri = srv_uri
         self.rest_uri = rest_uri
+        self.result = False
     
-    def timeOutPass(result):
+    def timeOutSucceed(self, result):
+        self.result = True
+        log.debug('setting result to true')
         return result
+        
+    def timeOutFail(self, result):
+        de = result.trap(defer.CancelledError)
+        if de == defer.CancelledError:
+            log.debug('Caught cancel error')
+            if self.result:
+                return True
+            else:
+                return result
+        elif self.result:
+            return True
+        else:
+            return result
+            
         
     def getData(self, headers, cookies, getTimeout=10):
         uri = '%s/%s' % (self.srv_uri, self.rest_uri)
@@ -59,7 +75,7 @@ class dataFetcher(object):
         log.debug('requesting %s with headers: %s and cookies: %s' % (uri, headers, cookies))
         x = d.get(headers, cookies)
         dc = reactor.callLater(getTimeout, x.cancel)
-        return x.addBoth(self.timeOutPass).addCallback(self.onResult).addErrback(self.onError)
+        return x.addCallbacks(self.timeOutSucceed,self.timeOutFail).addCallbacks(self.onResult,self.onError)
     
     def postData(self, postData, headers, cookies, putTimeout=10):
         uri = '%s/%s' % (self.srv_uri, self.rest_uri)
@@ -67,7 +83,7 @@ class dataFetcher(object):
         log.debug('posting to %s' % uri)
         x = d.post(postData, headers, cookies)
         dc = reactor.callLater(putTimeout, x.cancel)
-        return x.addBoth(self.timeOutPass).addCallback(self.onResult).addErrback(self.onError, uri)
+        return x.addCallbacks(self.timeOutSucceed,self.timeOutFail).addCallback(self.onResult).addErrback(self.onError, uri)
     
     def onResult(self, result):
         log.debug('Got Result!')
@@ -82,20 +98,26 @@ class dataFetcher(object):
                     interror.ConnectionRefusedError,
                     interror.TimeoutError,
                     interror.SSLError,
-                    interror.ConnectionLost
+                    interror.ConnectionLost,
+                    defer.CancelledError
                     )
         if l == interror.NoRouteError:
-            log.error("Login Error: No route to host")
+            log.error("API Error: No route to host")
         elif l == interror.ConnectError:
             log.error("Connection Error")
+        elif l == defer.CancelledError:
+            if self.result:
+                return True
+            else:
+                return reason
         else:
             log.error('Bind Error during uri request: %s - %s' % (uri,reason))
-        raise LoginError
+        raise ApiError
 
-class LoginError(Exception):
+class ApiError(Exception):
     """ Error received while attempting remote Opsview Login """
     def __repr__(self):
-        return 'LoginError'
+        return 'ApiError'
     
 def getInfo(srv_uri, req_uri, headers={}, cookies={}, timeout=10):
     rest_uri = req_uri
