@@ -14,6 +14,8 @@ import random, os, time, string
 import utils, subscriber
 
 log = utils.get_logger("WEBService")
+trueVals = ('Yes', 'yes', 'True', 'true')
+falseVals = ('No', 'no', 'False', 'false')
 
 css_dir = os.path.join(os.path.split(__file__)[0],'css')
 img_dir = os.path.join(os.path.split(__file__)[0],'image')
@@ -21,8 +23,13 @@ js_dir = os.path.join(os.path.split(__file__)[0],'javascript')
 
 httpport = utils.config.getint("general", "httpport")
 auto_series = utils.config.get("graph", "autocomplete_series")
+modal_close = utils.config.get("general", "dialog_autoclose")
+if modal_close in (trueVals):
+    modal_close = True
+else:
+    modal_close = False
 
-if auto_series in ('Yes', 'yes'):
+if auto_series in (trueVals):
     auto_series = True
 else:
     auto_series = False
@@ -446,7 +453,8 @@ class ViewSuitesElement(athena.LiveElement):
                     unicode(self.subscriber.getGraphTitle(self.suite)),
                     unicode(self.subscriber.getGraphStartTime(self.suite)),
                     unicode(self.subscriber.getGraphDuration(self.suite)),
-                    unicode(self.subscriber.getSuiteColumns(self.suite))
+                    unicode(self.subscriber.getSuiteColumns(self.suite)),
+                    modal_close
                     ]
         def onError(reason):
             log.error(reason)
@@ -1161,12 +1169,13 @@ class ExternalElement(athena.LiveElement):
         elif len(pageInitData) == 1:
             self.chart = pageInitData
         else:
-            return False
+            pass
         if graphData:
             for record in graphData:
                 self.callRemote('addGraphSeries', unicode(record[0]), unicode(record[1]), unicode(record[2]), unicode(record[3]), unicode(record[4]))
             if currentChart:
                 self.makeGraph()
+        return modal_close
     
     def saveGraph(self):
         graph_saved = self.subscriber.saveGraph(self.chart)

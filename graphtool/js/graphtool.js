@@ -12,7 +12,11 @@ Extern.ExternWidget.methods(
     
     function initialize(self) {
     var tmp = self.createTable('select_table');
-    self.callRemote('initialize');
+    var result = self.callRemote('initialize').addCallback(
+        function (result) {
+            theModalAutoClose = result;
+        }
+    );
     },
     
     function createSelect(self, name, id, def_option, options) {
@@ -440,11 +444,15 @@ Extern.ExternWidget.methods(
         var result = self.callRemote('makeGraph').addCallback(
             function (result) {
                 if (result) {
-                    var theModalDiv = document.getElementById('generateDialog');
-                    var theOldText = theModalDiv.firstChild;
-                    var theModalDivText = document.createTextNode('Graph Generation Complete!');
-                    theModalDiv.replaceChild(theModalDivText, theOldText);
-                    $jq("#generateDialog").dialog( "option", "buttons", { "Ok": function() { $jq(this).dialog("close");}});
+                    if (theModalAutoClose) {
+                        $jq("#generateDialog").dialog("close");
+                    } else {
+                        var theModalDiv = document.getElementById('generateDialog');
+                        var theOldText = theModalDiv.firstChild;
+                        var theModalDivText = document.createTextNode('Graph Generation Complete!');
+                        theModalDiv.replaceChild(theModalDivText, theOldText);
+                        $jq("#generateDialog").dialog( "option", "buttons", { "Ok": function() { $jq(this).dialog("close");}});
+                    }
                     // note generate successful and remove saving overlay
                 } else {
                     // note generate failure and display error/remove overlay
