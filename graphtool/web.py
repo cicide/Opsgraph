@@ -91,6 +91,18 @@ class opsviewRealm(object):
             
 class LoginForm(rend.Page):
     """ Minimalist Login Page"""
+    
+    def _renderErrors(self, ctx, data):
+        log.debug('login page context: %s' % ctx)
+        log.debug('login page data: %s' % data)
+        request = IRequest(ctx)
+        log.debug('login request: %s' % request)
+        if 'login-failure' in request.args:
+            loginError = 'Invalid Login'
+        else:
+            loginError = ''
+        return loginError
+    
     addSlash = True
     docFactory = loaders.stan(
         T.html[
@@ -113,7 +125,10 @@ class LoginForm(rend.Page):
                                   position: absolute;
                                   top: -100px;          /***  height / 2   ***/
                                   left: 50%;
-                                  }"""
+                                  }
+                                  
+                                  .loginErr {text-align: center; color: red; font-weight: bold}
+                                  .input-error {border:2px solid red;}"""
                     ]
                 ]
             ],
@@ -122,6 +137,9 @@ class LoginForm(rend.Page):
                     T.div(id='inner')[
                         T.form(action=guard.LOGIN_AVATAR, method="post")[
                             T.table[
+                                T.tr[
+                                    T.td(class_='loginErr', colspan='2') [_renderErrors]
+                                ],
                                 T.tr[
                                     T.td[ "Username:" ],
                                     T.td[ T.input(type='text', name='username') ],
