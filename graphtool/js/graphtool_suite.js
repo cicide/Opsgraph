@@ -16,6 +16,7 @@ ViewSuites.ViewSuiteWidget.methods(
         result = self.callRemote('initialize').addCallback(
             function(result) {
                 if (result) {
+                    theModalAutoClose = result[7];
                     self.createSortableList(result[0], result[1], result[2], result[3], result[4], result[5], result[6]);
                 } else {
                     // display an error here
@@ -246,11 +247,15 @@ ViewSuites.ViewSuiteWidget.methods(
         var result = self.callRemote('saveSuite', list_array).addCallback(
             function (result) {
                 if (result) {
-                    var theModalDiv = document.getElementById('saveDialog');
-                    var theOldText = theModalDiv.firstChild;
-                    var theModalDivText = document.createTextNode('Save Complete!');
-                    theModalDiv.replaceChild(theModalDivText, theOldText);
-                    $jq("#saveDialog").dialog( "option", "buttons", { "Ok": function() { $jq(this).dialog("close");}});
+                    if (theModalAutoClose) {
+                        $jq("#saveDialog").dialog("close");
+                    } else {
+                        var theModalDiv = document.getElementById('saveDialog');
+                        var theOldText = theModalDiv.firstChild;
+                        var theModalDivText = document.createTextNode('Save Complete!');
+                        theModalDiv.replaceChild(theModalDivText, theOldText);
+                        $jq("#saveDialog").dialog( "option", "buttons", { "Ok": function() { $jq(this).dialog("close");}});
+                    }
                     // note save successful and remove saving overlay
                 } else {
                     // not save failure and display error/remove overlay

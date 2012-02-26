@@ -10,10 +10,12 @@ from twisted.cred.credentials import IUsernamePassword, IAnonymous
 from nevow import appserver, athena, loaders, rend, inevow, guard, inevow, url, static, tags as T
 from nevow.inevow import ISession, IRequest
 from nevow.athena import expose
-import random, os, time
+import random, os, time, string
 import utils, subscriber
 
 log = utils.get_logger("WEBService")
+trueVals = ('Yes', 'yes', 'True', 'true')
+falseVals = ('No', 'no', 'False', 'false')
 
 css_dir = os.path.join(os.path.split(__file__)[0],'css')
 img_dir = os.path.join(os.path.split(__file__)[0],'image')
@@ -21,8 +23,13 @@ js_dir = os.path.join(os.path.split(__file__)[0],'javascript')
 
 httpport = utils.config.getint("general", "httpport")
 auto_series = utils.config.get("graph", "autocomplete_series")
+modal_close = utils.config.get("general", "dialog_autoclose")
+if modal_close in (trueVals):
+    modal_close = True
+else:
+    modal_close = False
 
-if auto_series in ('Yes', 'yes'):
+if auto_series in (trueVals):
     auto_series = True
 else:
     auto_series = False
@@ -91,6 +98,18 @@ class opsviewRealm(object):
             
 class LoginForm(rend.Page):
     """ Minimalist Login Page"""
+    
+    def _renderErrors(self, ctx, data):
+        log.debug('login page context: %s' % ctx)
+        log.debug('login page data: %s' % data)
+        request = IRequest(ctx)
+        log.debug('login request: %s' % request)
+        if 'login-failure' in request.args:
+            loginError = 'Invalid Login'
+        else:
+            loginError = ''
+        return loginError
+    
     addSlash = True
     docFactory = loaders.stan(
         T.html[
@@ -113,7 +132,10 @@ class LoginForm(rend.Page):
                                   position: absolute;
                                   top: -100px;          /***  height / 2   ***/
                                   left: 50%;
-                                  }"""
+                                  }
+                                  
+                                  .loginErr {text-align: center; color: red; font-weight: bold}
+                                  .input-error {border:2px solid red;}"""
                     ]
                 ]
             ],
@@ -122,6 +144,9 @@ class LoginForm(rend.Page):
                     T.div(id='inner')[
                         T.form(action=guard.LOGIN_AVATAR, method="post")[
                             T.table[
+                                T.tr[
+                                    T.td(class_='loginErr', colspan='2') [_renderErrors]
+                                ],
                                 T.tr[
                                     T.td[ "Username:" ],
                                     T.td[ T.input(type='text', name='username') ],
@@ -315,9 +340,10 @@ class ViewGraphsElement(athena.LiveElement):
             graph_type = graph_settings['graph_type']
             graph_width = graph_settings['graph_width']
             graph_height = graph_settings['graph_height']
-            #send the data back to the page for graphing - defChart needs to be replaced with a unique id
+            #TODO: send the new unique Id back to the subscriber so we have access to this chart (need for live chart)
+            defChart = getRandString(8)
             if chart.getChartEngine() == 'FusionCharts':
-                self.callRemote('addFusionChart', unicode(graph_type), unicode('defChart'), unicode('100%'), unicode('100%'), graph_object, unicode(chart_cell))
+                self.callRemote('addFusionChart', unicode(graph_type), unicode(defChart), unicode('100%'), unicode('100%'), graph_object, unicode(chart_cell))
             elif chart.getChartEngine() == 'HighCharts':
                 self.callRemote('addHighChart', graph_object)
             #self.subscriber.returnToLastChart()
@@ -427,7 +453,8 @@ class ViewSuitesElement(athena.LiveElement):
                     unicode(self.subscriber.getGraphTitle(self.suite)),
                     unicode(self.subscriber.getGraphStartTime(self.suite)),
                     unicode(self.subscriber.getGraphDuration(self.suite)),
-                    unicode(self.subscriber.getSuiteColumns(self.suite))
+                    unicode(self.subscriber.getSuiteColumns(self.suite)),
+                    modal_close
                     ]
         def onError(reason):
             log.error(reason)
@@ -1116,10 +1143,11 @@ class ExternalElement(athena.LiveElement):
             graph_width = graph_settings['graph_width']
             graph_height = graph_settings['graph_height']
             log.debug('graph settings returned')
-            #send the data back to the page for graphing - defChart needs to be replaced with a unique id
+            #TODO: send the new unique Id back to the subscriber so we have access to this chart (need for live chart)
+            defChart = getRandString(8)
             if self.chart.getChartEngine() == 'FusionCharts':
                 log.debug('sending object as fusionchart')
-                self.callRemote('addFusionChart', unicode(graph_type), unicode('defChart'), unicode(graph_width), unicode(graph_height), graph_object, unicode(chart_cell))
+                self.callRemote('addFusionChart', unicode(graph_type), unicode(defChart), unicode(graph_width), unicode(graph_height), graph_object, unicode(chart_cell))
             elif self.chart.getChartEngine() == 'HighCharts':
                 log.debug('sending object as highchart')
                 self.callRemote('addHighChart', graph_object)
@@ -1141,12 +1169,13 @@ class ExternalElement(athena.LiveElement):
         elif len(pageInitData) == 1:
             self.chart = pageInitData
         else:
-            return False
+            pass
         if graphData:
             for record in graphData:
                 self.callRemote('addGraphSeries', unicode(record[0]), unicode(record[1]), unicode(record[2]), unicode(record[3]), unicode(record[4]))
             if currentChart:
                 self.makeGraph()
+        return modal_close
     
     def saveGraph(self):
         graph_saved = self.subscriber.saveGraph(self.chart)
@@ -1242,6 +1271,14 @@ class NotFoundPage(rend.Page):
         request.redirect('/')
         return ''
     
+
+def getRandString(length):
+    digs = string.digits
+    ltrs = string.letters
+    rndset = digs + ltrs
+    rndStr = "".join([random.choice(rndset) for i in xrange(length)])
+    return rndStr
+
 def wrapAuthorized(site):
     site = inevow.IResource(site)
     realmObject = opsviewRealm(site)

@@ -5,7 +5,8 @@
  * Dual licensed under the MIT or GPL Version 2 licenses.
  *
  */
- 
+ /* login error */
+.loginErr { text-align: center; color: red; font-weight: bold;}
  /* input validation --------------------*/
 .input-error { border:2px solid red; }
 /* button placement ---------------------*/
@@ -31,3 +32,23 @@
 /* resizable highcharts */
 
 .graphDiv { width: 100%; height: 100%;}
+
+/* center of page area */
+
+#outer { position: absolute;
+         top: 50%;
+         left: 0px;
+         width: 100%;
+         height: 1px;
+         overflow: visible;
+        }
+
+#inner { width: 300px;
+         height: 200px;
+         margin-left: -150px;  /***  width / 2   ***/
+         position: absolute;
+         top: -100px;          /***  height / 2   ***/
+         left: 50%;
+        }
+
+

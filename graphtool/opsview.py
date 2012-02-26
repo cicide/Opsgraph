@@ -2,7 +2,7 @@
 
 from twisted.names import client as dns_client
 from twisted.web import client as web_client
-from twisted.internet import defer
+from twisted.internet import defer, reactor
 from paste.auth import auth_tkt
 
 import json, time, datetime, urllib
@@ -14,11 +14,13 @@ cfg_sections = utils.config.sections()
 
 graph_duration = '%s%s' % (utils.config.get('graph', 'duration_length'), utils.config.get('graph', 'duration_unit'))
 local_ip = utils.config.get('general', 'local_ip')
-event_full_load_period = utils.config.get('events', 'full_load_period')
-event_inc_load_period = utils.config.get('events', 'incremental_load_period')
+event_full_load_period = int(utils.config.get('events', 'full_load_period'))
+event_inc_load_period = int(utils.config.get('events', 'incremental_load_period'))
 
 node_list = {}
 event_type_list = ['outage', 'event']
+loginTimeout = 10
+dataTimeout = 20
 
 class Node(object):
     def __init__(self, name, type):
@@ -70,6 +72,7 @@ class Domain(Node):
         self.do_dns_lookup(self.host)
         self.event_type_list = []
         self.eventList = []
+        self.rescan_sched = 0
         self.loadEvents()
         
     def loadEvents(self):
@@ -109,9 +112,15 @@ class Domain(Node):
             log.debug('Parsed event list for node %s: %s' % (self.name, event_list))
         def onCompleteSuccess(result):
             log.debug('Got Complete result for Node %s: ' % self.name)
-            log.debug(result)
+            #log.debug(result)
+            #schedule the next full event load for the event timeout
+            log.debug("scheduling an event rescan for %s in %i seconds" % (self.host, event_full_load_period))
+            reactor.callLater(event_full_load_period, self.loadEvents)
         def onFailure(reason):
             log.error(reason)
+        def onCompleteFailure(reason):
+            # we got an error loading events, reschedule a new event load in one minute
+            reactor.callLater(60, self.loadEvents)
         ds = []
         d1 = txdbinterface.getEventTypes()
         d1.addCallbacks(onTypeSuccess,onFailure)
@@ -120,12 +129,12 @@ class Domain(Node):
         d2.addCallbacks(onEventsSuccess,onFailure)
         ds.append(d2)
         d = defer.DeferredList(ds, consumeErrors=False)
-        d.addCallbacks(onCompleteSuccess,onFailure)
+        d.addCallbacks(onCompleteSuccess,onCompleteFailure)
         
     def getHostList(self):
         host_list = []
         for i in self.children:
-           host_list.append(i)
+            host_list.append(i)
         return host_list
 
     def getEvents(self):
@@ -145,7 +154,7 @@ class Domain(Node):
         return d
         
     def onErr(self, reason):
-        log.debug(reason)
+        log.error(reason)
         
     def setVersions(self, easyxdm, api_min, api):
         self.easyxdm_version = easyxdm
@@ -167,7 +176,7 @@ class Domain(Node):
         def onFail(reason):
             log.error(reason)
         postData = {'username': self.login, 'password': self.password}
-        d = rest_api.postData(self.uri, 'rest/login', postData)
+        d = rest_api.postData(self.uri, 'rest/login', postData, timeout=loginTimeout)
         d.addCallbacks(onSuccess,onFail)
         return d
     
@@ -188,7 +197,8 @@ class Domain(Node):
             headers = []
             cj['auth_tkt'] = self._makeTicket(userid=username, remote_addr=local_ip)
             log.debug('requesting web auth with ticket: %s' % cj)
-            d = web_client.getPage(self.uri,headers,method='GET',cookies=cj)
+            #d = web_client.getPage(self.uri, headers, method='GET', cookies=cj)
+            d = rest_api.getInfo(self.uri, '', headers, cookies=cj, timeout=loginTimeout)
             d.addCallback(onTktSuccess, token_result).addErrback(onTktFail, token_result)
             return d
         def onSuccess(result):
@@ -202,17 +212,21 @@ class Domain(Node):
                 log.debug('user logged in with token %s' % token)
                 return (token, cred_time, cj)
         def onFail(reason):
-            log.error(reason)
+            l = reason.trap(rest_api.LoginError)
+            if l == rest_api.LoginError:
+                pass
+            else:
+                log.error(reason)
             return False
         cj = {}
         cj['auth_tkt'] = self._makeTicket(userid=username, remote_addr=local_ip)
         postData = {'username': username, 'password': password}
-        d = rest_api.postData(self.uri, 'rest/login', postData, headers={}, cookies=cj)
+        d = rest_api.postData(self.uri, 'rest/login', postData, headers={}, cookies=cj, timeout=loginTimeout)
         d.addCallbacks(onSuccess,onFail)
-        #d.addBoth(get_auth_tkt)
         return d
     
     def initialize(self, result=None):
+        self.rescan_sched = 0
         # if we don't have a token, we need to get one
         if not self.masterLoginToken:
             log.info('Initializing opsview node %s' % self.name)
@@ -220,7 +234,7 @@ class Domain(Node):
             return d.addCallback(self.initialize).addErrback(self.onErr)
         else:
             self.creds = {'X-Opsview-Username': self.login, 'X-Opsview-Token': self.masterLoginToken}
-            d = rest_api.getInfo(self.uri, 'rest/status/service', headers=self.creds)
+            d = rest_api.getInfo(self.uri, 'rest/status/service', headers=self.creds, timeout=loginTimeout)
             return d.addCallbacks(self.addServices,self.onErr)
             
     def getHostByName(self, name):
@@ -245,12 +259,34 @@ class Domain(Node):
                 log.info('Found %i graphable metrics for domain %s' % (len(host_metric_list), self.name))
                 log.info('Domain initialization for domain %s complete' % self.name)
                 self.initialized = True
-                return 1
+                #schedule a rescan based on the rescan timer
+                if not self.rescan_sched:
+                    log.debug('scheduling a node rescan in %i seconds' % self.rescan)
+                    reactor.callLater(self.rescan, self.initialize)
+                    self.rescan_sched = int(time.time()) + self.rescan
+                else:
+                    log.debug('a rescan is already scheduled for this node in %i seconds' % rescan_time)
+                    rescan_time = self.rescan_sched - int(time.time())
+                return True
             else:
-                return 0
+                if self.rescan_sched:
+                    if (self.rescan_sched - int(time.time())) > 120:
+                        log.debug('initialize failed, scheduling a rescan for in one minute')
+                        reactor.callLater(60, self.initialize)
+                        self.rescan_sched = int(time.time()) + 60
+                    else:
+                        log.debug('initialize failed, rescan already scheduled within the next two minutes')
+                return False
         else:
             log.debug('No result')
-            return 0
+            if self.rescan_sched:
+                if (self.rescan_sched - int(time.time())) > 120:
+                    log.debug('initialize failed, scheduling a rescan for in one minute')
+                    reactor.callLater(60, self.initialize)
+                    self.rescan_sched = int(time.time()) + 60
+                else:
+                    log.debug('initialize failed, rescan already scheduled within the next two minutes')
+            return False
             
     def addServices(self, result=None):
         self.cred_time = int(time.time())
@@ -262,6 +298,10 @@ class Domain(Node):
             service_list = services['list']
             service_sum = services['summary']
             host_count = 0
+            #remove the old children set
+            log.debug("Reloading Domain %s" % self.host)
+            self.initialized = False
+            self.children = {}
             for item in service_list:
                 host_count += 1
                 item_services = item['services']
@@ -314,9 +354,9 @@ class Domain(Node):
                                       svc_host)
                     host.addChild(svc_obj)
             log.info('found %s hosts for node %s' % (host_count, self.name))
-            perfmetrics = rest_api.getInfo(self.uri, 'rest/runtime/performancemetric', headers=self.creds)
+            perfmetrics = rest_api.getInfo(self.uri, 'rest/runtime/performancemetric', headers=self.creds, timeout=dataTimeout)
             perfmetrics.addCallbacks(self.saveMetricData,self.onErr)
-            return 1
+            return perfmetrics
                 
     def getName(self):
         return self.name
@@ -327,22 +367,36 @@ class Domain(Node):
     def getApi(self):
         return api_tool
     
-    def fetchData(self, uri, end_time=None, duration=None, creds={}, cookies={}):
+    def fetchData(self, uri, end_time=None, duration=None, creds={}, cookies={}, timeout=dataTimeout, retry=0):
         def onSuccess(result):
             return result
-        def onFailure(result):
-            return result
+        def onFailure(result, uri=None, end_time=None, duration=None, creds=None, cookies=None, timeout=dataTimeout, retry=0):
+            #trap possible errors here
+            l = result.trap(rest_api.ApiError, defer.CancelledError)
+            if l == rest_api.ApiError:
+                retry += 1
+                if uri:
+                    if retry < 3:
+                        return self.fetchData(uri, end_time, duration, creds, cookies, timeout, retry)
+                    else:
+                        return result
+                else:
+                    return result
+            elif l == defer.CancelledError:
+                log.debug('got timeout error')
+            else:
+                log.debug('got error: %s' % result)
+                return result
         if not duration:
             duration = graph_duration
         if not end_time:
             end_time = int(time.time())
         if len(creds) == 0:
             creds = self.creds
-        #url = '%s?hsm=%s&end_time=%s&duration=%s' % (api_tool, urllib.quote_plus(uri), end_time, duration)
         url = '%s?hsm=%s&end=%s&duration=%s' % (self.api_tool, urllib.quote_plus(uri), end_time, duration)
         log.debug('requesting %s from %s' % (url, self.uri))
-        d = rest_api.getInfo(self.uri, str(url), headers=creds, cookies=cookies)
-        return d.addCallbacks(onSuccess,onFailure)
+        d = rest_api.getInfo(self.uri, str(url), headers=creds, cookies=cookies, timeout=timeout)
+        return d.addCallback(onSuccess).addErrback(onFailure, uri, end_time, duration, creds, cookies, timeout, retry)
 
     def _makeTicket(self, 
                     userid='userid', 
@@ -544,6 +598,6 @@ for section in cfg_sections:
         node = Domain(server_name, server_host, server_login, server_password, server_tkt_shared, server_api_tool, server_rescan)
         node_list[server_name] = node
         node_uri = node_list[server_name].getUri()
-        node_versions = rest_api.getInfo(node_uri, 'rest')
+        node_versions = rest_api.getInfo(node_uri, 'rest', timeout=dataTimeout)
         node_versions.addCallback(saveVersionInfo, node=node).addErrback(errInfo)
         node = None
