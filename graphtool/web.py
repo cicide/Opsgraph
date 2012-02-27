@@ -96,6 +96,70 @@ class opsviewRealm(object):
             session.setComponent(ISubscriberObject, None)
         return logout
             
+class TopTabs(rend.Fragment):
+    """ Navigation bar """
+    
+    def __init__(self):
+        rend.Fragment.__init__(self)
+        
+    def child_createGraph(self, ctx):
+        return ExternalPage()
+    
+    def child_loadGraph(self, ctx):
+        return LoadGraphPage()
+    
+    def child_viewGraph(self, ctx):
+        return ViewGraphPage()
+    
+    def child_loadSuite(self, ctx):
+        return LoadSuitePage()
+    
+    def child_createSuite(self, ctx):
+        return ViewSuitesPage()
+    
+    def child_rootPage(self, cts):
+        return RootPage()
+
+    
+    docFactory = loaders.stan(
+        T.div(id="navbar")[
+            T.span(class_="inbar")[
+                T.ul(class_="menu_tabbed")[
+                    T.li[
+                        T.a(href="/")[
+                            T.span["Home"]
+                        ]
+                    ],
+                    T.li[
+                        T.a(href='/createGraph')[
+                            T.span["Build a Graph"]
+                        ]
+                    ],
+                    T.li[
+                        T.a(href='/createSuite')[
+                            T.span["Build a Suite"]
+                        ]
+                    ],
+                    T.li[
+                        T.a(href='/loadGraph')[
+                            T.span["Load a Graph"]
+                        ]
+                    ],
+                    T.li[
+                        T.a(href='/loadSuite')[
+                            T.span["Load a Suite"]
+                        ]
+                    ],
+                    T.li[
+                        T.a(href='/__logout__')[
+                            T.span["Logout"]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    )
+    
 class LoginForm(rend.Page):
     """ Minimalist Login Page"""
     
@@ -180,10 +244,12 @@ class RootPage(rend.Page):
         request.redirect('/')
         return ''
     
+    def render_navBar(self, ctx, data):
+        return ctx.tag[TopTabs()]
+    
     def setSubscriber(self, sub):
         self.subscriber = sub
 
-    addSlash = True
 
     def render_theTitle(self, ctx, data):
         session = ISession(ctx)
@@ -208,7 +274,8 @@ class RootPage(rend.Page):
     
     def child_createSuite(self, ctx):
         return ViewSuitesPage()
-    
+
+    addSlash = True
     child_css = static.File('css')
     child_images = static.File('image')
     child_fusioncharts = static.File('fusioncharts')
@@ -219,6 +286,7 @@ class RootPage(rend.Page):
         T.html[
             T.head[
                 T.title[render_theTitle],
+                T.link(type='text/css', href='css/opsgraph.css', rel='Stylesheet'),
                 T.style(type="text/css")[
                     T.comment[""" #outer {
                                   position: absolute;
@@ -241,19 +309,20 @@ class RootPage(rend.Page):
                 ]
             ],
             T.body[
-                T.div(id='outer')[
-                    T.div(id='inner')[
-                        T.div(align='center')[T.a(id='createGraph', href=url.here.child('createGraph'))['Create a Graph']],
-                        T.p[''],
-                        T.div(align='center')[T.a(id='createSuite', href=url.here.child('createSuite'))['Create a Suite']],
-                        T.p[''],
-                        T.div(align='center')[T.a(id='loadGraph', href=url.here.child('loadGraph'))['Load a Graph']],
-                        T.p[''],
-                        T.div(align='center')[T.a(id='loadSuite', href=url.here.child('loadSuite'))['Load a Graph Suite']],
-                        T.p[''],
-                        T.div(align='center')[T.a(href=url.here.child(guard.LOGOUT_AVATAR))['Logout']]
-                    ]
-                ]
+                T.div[render_navBar]
+                #T.div(id='outer')[
+                    #T.div(id='inner')[
+                        #T.div(align='center')[T.a(id='createGraph', href=url.here.child('createGraph'))['Create a Graph']],
+                        #T.p[''],
+                        #T.div(align='center')[T.a(id='createSuite', href=url.here.child('createSuite'))['Create a Suite']],
+                        #T.p[''],
+                        #T.div(align='center')[T.a(id='loadGraph', href=url.here.child('loadGraph'))['Load a Graph']],
+                        #T.p[''],
+                        #T.div(align='center')[T.a(id='loadSuite', href=url.here.child('loadSuite'))['Load a Graph Suite']],
+                        #T.p[''],
+                        #T.div(align='center')[T.a(href=url.here.child(guard.LOGOUT_AVATAR))['Logout']]
+                    #]
+                #]
             ]
         ]
     )
@@ -267,6 +336,9 @@ class ViewGraphPage(athena.LivePage):
         
     def render_theTitle(self, ctx, data):
         return 'Opsgraph: View Graph'
+
+    def render_navBar(self, ctx, data):
+        return ctx.tag[TopTabs()]
     
     def render_viewGraphsElement(self, ctx, data):
         session = ISession(ctx)
@@ -368,6 +440,24 @@ class ViewSuitesPage(athena.LivePage):
     def render_theTitle(self, ctx, data):
         return 'Opsgraph: View Suite'
     
+    def render_navBar(self, ctx, data):
+        request = IRequest(ctx)
+        if 'glist' in request.args:
+            return ctx.tag[TopTabs()]
+        elif 'sid' in request.args:
+            if 'perms' in request.args:
+                perms = request.args['perms'][0]
+                if perms == 'rw':
+                    return ctx.tag[TopTabs()]
+                else:
+                    return ''
+            else:
+                perms = 'ro'
+                return ''
+        else:
+            return ctx.tag[TopTabs()]
+        
+    
     def render_viewSuitesElement(self, ctx, data):
         session = ISession(ctx)
         request = IRequest(ctx)
@@ -407,6 +497,7 @@ class ViewSuitesPage(athena.LivePage):
                     T.script(type='text/javascript', src='highcharts/highcharts.js')
                 ],
                 T.body(render=T.directive('viewSuitesElement'))[
+                    T.div[render_navBar],
                     T.span(width='100%')[
                         T.div(id='suiteControl'),
                         T.div(id='suiteArea')
@@ -619,6 +710,9 @@ class LoadSuitePage(athena.LivePage):
     def render_theTitle(self, ctx, data):
         return 'Opsgraph: Load Suite'
     
+    def render_navBar(self, ctx, data):
+        return ctx.tag[TopTabs()]
+    
     def render_loadSuitesElement(self, ctx, data):
         session = ISession(ctx)
         subscriber = session.getComponent(ISubscriberObject)
@@ -639,6 +733,7 @@ class LoadSuitePage(athena.LivePage):
                 T.script(type='text/javascript', src='javascript/jquery.dataTables.min.js')
             ],
             T.body(render=T.directive('loadSuitesElement'))[
+                T.div[render_navBar],
                 T.form(name='loadSuiteForm')[
                     T.table(id='loadSuitesTable', class_='sortableTable', width='100%')[
                         T.thead[
@@ -724,6 +819,9 @@ class LoadGraphPage(athena.LivePage):
     def render_theTitle(self, ctx, data):
         return 'Opsgraph: Load Graph'
     
+    def render_navBar(self, ctx, data):
+        return ctx.tag[TopTabs()]
+    
     def render_loadGraphsElement(self, ctx, data):
         session = ISession(ctx)
         subscriber = session.getComponent(ISubscriberObject)
@@ -744,6 +842,7 @@ class LoadGraphPage(athena.LivePage):
                 T.script(type='text/javascript', src='javascript/jquery.dataTables.min.js')
             ],
             T.body(render=T.directive('loadGraphsElement'))[
+                T.div[render_navBar],
                 T.form(name='loadGraphForm')[
                     T.table(id='loadGraphsTable', class_='sortableTable', width='100%')[
                         T.thead[
@@ -1169,7 +1268,7 @@ class ExternalElement(athena.LiveElement):
         elif len(pageInitData) == 1:
             self.chart = pageInitData
         else:
-            pass
+            graphData = []
         if graphData:
             for record in graphData:
                 self.callRemote('addGraphSeries', unicode(record[0]), unicode(record[1]), unicode(record[2]), unicode(record[3]), unicode(record[4]))
@@ -1233,6 +1332,9 @@ class ExternalPage(athena.LivePage):
     def render_theTitle(self, ctx, data):
         return 'Opsgraph: Create Graph'
     
+    def render_navBar(self, ctx, data):
+        return ctx.tag[TopTabs()]
+    
     def render_externalElement(self, ctx, data):
         session = ISession(ctx)
         request = ISession(ctx)
@@ -1255,7 +1357,9 @@ class ExternalPage(athena.LivePage):
                 T.script(type='text/javascript', src='fusioncharts/FusionCharts.js'),
                 T.script(type='text/javascript', src='highcharts/highcharts.js')
             ],
-            T.body(render=T.directive('externalElement'))
+            T.body(render=T.directive('externalElement'))[
+                T.div[render_navBar]
+            ]
         ]
     )
     
