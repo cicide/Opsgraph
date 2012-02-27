@@ -126,32 +126,32 @@ class TopTabs(rend.Fragment):
             T.span(class_="inbar")[
                 T.ul(class_="menu_tabbed")[
                     T.li[
-                        T.a(href=url.here.child('rootPage'))[
+                        T.a(href="/")[
                             T.span["Home"]
                         ]
                     ],
                     T.li[
-                        T.a(href=url.here.child('createGraph'))[
+                        T.a(href='/createGraph')[
                             T.span["Build a Graph"]
                         ]
                     ],
                     T.li[
-                        T.a(href=url.here.child('createSuite'))[
+                        T.a(href='/createSuite')[
                             T.span["Build a Suite"]
                         ]
                     ],
                     T.li[
-                        T.a(href=url.here.child('loadGraph'))[
+                        T.a(href='/loadGraph')[
                             T.span["Load a Graph"]
                         ]
                     ],
                     T.li[
-                        T.a(href=url.here.child('loadSuite'))[
+                        T.a(href='/loadSuite')[
                             T.span["Load a Suite"]
                         ]
                     ],
                     T.li[
-                        T.a(href=url.here.child(guard.LOGOUT_AVATAR))[
+                        T.a(href='/__logout__')[
                             T.span["Logout"]
                         ]
                     ]
