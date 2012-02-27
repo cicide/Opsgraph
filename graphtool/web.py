@@ -309,20 +309,20 @@ class RootPage(rend.Page):
                 ]
             ],
             T.body[
-                T.div[render_navBar],
-                T.div(id='outer')[
-                    T.div(id='inner')[
-                        T.div(align='center')[T.a(id='createGraph', href=url.here.child('createGraph'))['Create a Graph']],
-                        T.p[''],
-                        T.div(align='center')[T.a(id='createSuite', href=url.here.child('createSuite'))['Create a Suite']],
-                        T.p[''],
-                        T.div(align='center')[T.a(id='loadGraph', href=url.here.child('loadGraph'))['Load a Graph']],
-                        T.p[''],
-                        T.div(align='center')[T.a(id='loadSuite', href=url.here.child('loadSuite'))['Load a Graph Suite']],
-                        T.p[''],
-                        T.div(align='center')[T.a(href=url.here.child(guard.LOGOUT_AVATAR))['Logout']]
-                    ]
-                ]
+                T.div[render_navBar]
+                #T.div(id='outer')[
+                    #T.div(id='inner')[
+                        #T.div(align='center')[T.a(id='createGraph', href=url.here.child('createGraph'))['Create a Graph']],
+                        #T.p[''],
+                        #T.div(align='center')[T.a(id='createSuite', href=url.here.child('createSuite'))['Create a Suite']],
+                        #T.p[''],
+                        #T.div(align='center')[T.a(id='loadGraph', href=url.here.child('loadGraph'))['Load a Graph']],
+                        #T.p[''],
+                        #T.div(align='center')[T.a(id='loadSuite', href=url.here.child('loadSuite'))['Load a Graph Suite']],
+                        #T.p[''],
+                        #T.div(align='center')[T.a(href=url.here.child(guard.LOGOUT_AVATAR))['Logout']]
+                    #]
+                #]
             ]
         ]
     )
@@ -367,7 +367,6 @@ class ViewGraphPage(athena.LivePage):
                 T.script(type='text/javascript', src='highcharts/highcharts.js')
             ],
             T.body(render=T.directive('viewGraphsElement'))[
-                T.div[render_navBar],
                 T.div(id='graphArea')
             ]
         ]
@@ -442,7 +441,22 @@ class ViewSuitesPage(athena.LivePage):
         return 'Opsgraph: View Suite'
     
     def render_navBar(self, ctx, data):
-        return ctx.tag[TopTabs()]
+        request = IRequest(ctx)
+        if 'glist' in request.args:
+            return ctx.tag[TopTabs()]
+        elif 'sid' in request.args:
+            if 'perms' in request.args:
+                perms = request.args['perms'][0]
+                if perms == 'rw':
+                    return ctx.tag[TopTabs()]
+                else:
+                    return ''
+            else:
+                perms = 'ro'
+                return ''
+        else:
+            return ctx.tag[TopTabs()]
+        
     
     def render_viewSuitesElement(self, ctx, data):
         session = ISession(ctx)
