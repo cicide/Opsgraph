@@ -47,10 +47,16 @@ class Node(object):
             if pat.search(key) is not None:
                 returnList[key] = self.children[key]
         return returnList
+    
+    def getChild(self, child):
+        if child in self.children:
+            return self.children[child]
+        else:
+            return False
 
 class Domain(Node):
     
-    def __init__(self, name, host, login, passwd, shared_secret, api_tool, rescan):
+    def __init__(self, name, host, login, passwd, shared_secret, api_tool, rescan, odwHost, odwDb, odwUser, odwPass):
         Node.__init__(self, name, "Domain")
         self.host = host.split('//')[1]
         self.uri = host
@@ -73,6 +79,10 @@ class Domain(Node):
         self.event_type_list = []
         self.eventList = []
         self.rescan_sched = 0
+        self.odwHost = odwHost
+        self.odwDb = odwDb
+        self.odwUser = odwUser
+        self.odwPass = odwPass
         self.loadEvents()
         
     def loadEvents(self):
@@ -367,17 +377,17 @@ class Domain(Node):
     def getApi(self):
         return api_tool
     
-    def fetchData(self, uri, end_time=None, duration=None, creds={}, cookies={}, timeout=dataTimeout, retry=0):
+    def fetchData(self, uri, end_time=None, duration=None, creds={}, cookies={}, hsm=None, timeout=dataTimeout, retry=0):
         def onSuccess(result):
             return result
-        def onFailure(result, uri=None, end_time=None, duration=None, creds=None, cookies=None, timeout=dataTimeout, retry=0):
+        def onFailure(result, uri=None, end_time=None, duration=None, creds=None, cookies=None, hsm=None, timeout=dataTimeout, retry=0):
             #trap possible errors here
             l = result.trap(rest_api.ApiError, defer.CancelledError)
             if l == rest_api.ApiError:
                 retry += 1
                 if uri:
                     if retry < 3:
-                        return self.fetchData(uri, end_time, duration, creds, cookies, timeout, retry)
+                        return self.fetchData(uri, end_time, duration, creds, cookies, hsm, timeout, retry)
                     else:
                         return result
                 else:
@@ -393,10 +403,31 @@ class Domain(Node):
             end_time = int(time.time())
         if len(creds) == 0:
             creds = self.creds
-        url = '%s?hsm=%s&end=%s&duration=%s' % (self.api_tool, urllib.quote_plus(uri), end_time, duration)
-        log.debug('requesting %s from %s' % (url, self.uri))
-        d = rest_api.getInfo(self.uri, str(url), headers=creds, cookies=cookies, timeout=timeout)
-        return d.addCallback(onSuccess).addErrback(onFailure, uri, end_time, duration, creds, cookies, timeout, retry)
+        if hsm:
+            host, service, metric = hsm
+            m_host = self.getChild(host)
+            if m_host:
+                m_service = m_host.getChild(service)
+                if m_service:
+                    m_metric = m_service.getChild(metric)
+                    if m_metric:
+                        # the host, service, metric is valid, request the data
+                        url = '%s?hsm=%s&end=%s&duration=%s' % (self.api_tool, urllib.quote_plus(uri), end_time, duration)
+                        log.debug('requesting %s from %s' % (url, self.uri))
+                        d = m_metric.fetchData(self.uri, str(url), headers=creds, cookies=cookies, timeout=timeout)
+                        return d.addCallback(onSuccess).addErrback(onFailure, uri, end_time, duration, creds, cookies, timeout, retry)
+                    else:
+                        log.error('no valid metric found')
+                        return None
+                else:
+                    log.error('no valid service found')
+                    return None
+            else:
+                log.error('no valid host found')
+                return None
+        else:
+            log.error('invalid hsm (no hsm) supplied')
+            return None
 
     def _makeTicket(self, 
                     userid='userid', 
@@ -524,7 +555,30 @@ class Metric(Node):
     def __init__(self, name):
         Node.__init__(self, name, "Metric")
         self.data = {}
-        self.touched = int(time.time()) 
+        self.touched = int(time.time())
+        
+    def addData(self, data):
+        """ add fetched data to cache """
+        pass
+    
+    def getCacheExtents(self):
+        """ returns the lowest x value and highest x value """
+        pass
+    
+    def fetchData(self, uri, url, headers, cookies, timeout):
+        def onSuccess(result):
+            #we got back a result from our data fetch request - add it to our cache and set our timestamp
+            #return the result to the calling function
+            return result
+        def onFailure(reason):
+            # pass the error on, we don't need to handle it, as the calling function will handle it
+            return reason
+        # add cache check here
+        return rest_api.getInfo(uri, str(url), headers=headers, cookies=cookies, timeout=timeout)
+        # for now just return the query result and let the calling routine handle it. However we will
+        # need to handle the success and failure here (with retries and timeouts) and pass back the 
+        # result once the deferred fires.
+        #d.addCallback(onSuccess).addErrback(onFailure)
     
 def saveVersionInfo(result, node):
     if 'easyxdm_version' not in result:
@@ -595,7 +649,15 @@ for section in cfg_sections:
         server_tkt_shared = utils.config.get(section, "shared_secret")
         server_api_tool = utils.config.get(section, "api_tool")
         server_rescan = utils.config.get(section, "rescan")
-        node = Domain(server_name, server_host, server_login, server_password, server_tkt_shared, server_api_tool, server_rescan)
+        try:
+            odw_host = utils.config.get(section, "odw_host")
+            odw_db = utils.config.get(section, "odw_db")
+            odw_user = utils.config.get(section, "odw_user")
+            odw_pass = utils.config.get(section, "odw_pass")
+        except:
+            odw_host = odw_db = odw_user = odw_pass = None
+            log.info('Found no or invalid odw data for node %s' % server_name)
+        node = Domain(server_name, server_host, server_login, server_password, server_tkt_shared, server_api_tool, server_rescan, odw_host, odw_db, odw_user, odw_pass)
         node_list[server_name] = node
         node_uri = node_list[server_name].getUri()
         node_versions = rest_api.getInfo(node_uri, 'rest', timeout=dataTimeout)

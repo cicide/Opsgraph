@@ -582,7 +582,7 @@ class subscriber(object):
             api_uri = '%s::%s::%s' % (host, service, metric)
             chart.setSeriesUri(row, data_node, api_uri)
             end_time,duration = chart.calculateGraphPeriod()
-            result = opsview.node_list[data_node].fetchData(api_uri, end_time, duration, creds, cookies)
+            result = opsview.node_list[data_node].fetchData(api_uri, end_time, duration, creds, cookies, (host, service, metric))
             result.addCallback(onSeriesSuccess, row)
             ds.append(result)
         d = defer.DeferredList(ds, consumeErrors=False)

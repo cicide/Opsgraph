@@ -98,7 +98,7 @@ class opsviewRealm(object):
             
 class TopTabs(rend.Fragment):
     """ Navigation bar """
-    
+
     def __init__(self):
         rend.Fragment.__init__(self)
         
