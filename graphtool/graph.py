@@ -592,7 +592,12 @@ class chart(object):
             return []
         key_list = []
         for key in data.keys():
-            key_list.append(key)
+            if data[key]:
+                key_list.append(key)
+        if not key_list:
+            return []
+        # if this is rrdfetch data, the first object per series is a ResultSet object
+        # if this is rest/graph data, the first object is a list
         if 'ResultSet' in data[key_list[0]]:
             #do data normalization
             data_series = []
@@ -644,8 +649,6 @@ class chart(object):
                 data_series.append(series_list)
             return data_series
         
-        # if this is rrdfetch data, the first object per series is a ResultSet object
-        # if this is rest/graph data, the first object is a list
     
     def calculateGraphPeriod(self):
         # Calculate the end_time and duration from the start_time and duration provided by the user

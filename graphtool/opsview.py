@@ -21,6 +21,8 @@ node_list = {}
 event_type_list = ['outage', 'event']
 loginTimeout = 10
 dataTimeout = 20
+cacheLife = 3600 # dump any cache that hasn't been used in 60 mins
+cacheLatency = 300 # don't fetch new data if newest data in cache is less than 5 mins old
 
 class Node(object):
     def __init__(self, name, type):
@@ -84,6 +86,12 @@ class Domain(Node):
         self.odwUser = odwUser
         self.odwPass = odwPass
         self.loadEvents()
+        
+    def getOdw(self):
+        if self.odwHost:
+            return (self.odwHost, self.odwDb, self.odwUser, self.odwPass)
+        else:
+            return None
         
     def loadEvents(self):
         def onTypeSuccess(result):
@@ -377,26 +385,7 @@ class Domain(Node):
     def getApi(self):
         return api_tool
     
-    def fetchData(self, uri, end_time=None, duration=None, creds={}, cookies={}, hsm=None, timeout=dataTimeout, retry=0):
-        def onSuccess(result):
-            return result
-        def onFailure(result, uri=None, end_time=None, duration=None, creds=None, cookies=None, hsm=None, timeout=dataTimeout, retry=0):
-            #trap possible errors here
-            l = result.trap(rest_api.ApiError, defer.CancelledError)
-            if l == rest_api.ApiError:
-                retry += 1
-                if uri:
-                    if retry < 3:
-                        return self.fetchData(uri, end_time, duration, creds, cookies, hsm, timeout, retry)
-                    else:
-                        return result
-                else:
-                    return result
-            elif l == defer.CancelledError:
-                log.debug('got timeout error')
-            else:
-                log.debug('got error: %s' % result)
-                return result
+    def fetchData(self, h_s_m, end_time=None, duration=None, creds={}, cookies={}, hsm=None, durSet=(), timeout=dataTimeout, retry=0):
         if not duration:
             duration = graph_duration
         if not end_time:
@@ -412,10 +401,8 @@ class Domain(Node):
                     m_metric = m_service.getChild(metric)
                     if m_metric:
                         # the host, service, metric is valid, request the data
-                        url = '%s?hsm=%s&end=%s&duration=%s' % (self.api_tool, urllib.quote_plus(uri), end_time, duration)
-                        log.debug('requesting %s from %s' % (url, self.uri))
-                        d = m_metric.fetchData(self.uri, str(url), headers=creds, cookies=cookies, timeout=timeout)
-                        return d.addCallback(onSuccess).addErrback(onFailure, uri, end_time, duration, creds, cookies, timeout, retry)
+                        result =  m_metric.getData(self.uri, self.api_tool, h_s_m, end_time, durSet, headers=creds, cookies=cookies, timeout=timeout)
+                        return result
                     else:
                         log.error('no valid metric found')
                         return None
@@ -554,32 +541,234 @@ class Metric(Node):
     # we cache data for a metric here
     def __init__(self, name):
         Node.__init__(self, name, "Metric")
-        self.data = {}
+        self.dataCache = {}
         self.touched = int(time.time())
+        self.cacheLastHit = 0
+        self.cacheExpire = None
+        self.live = None
         
-    def addData(self, data):
+    def _ackCacheHit(self):
+        """ called whenever we need to mark the cache as freshened """
+        self.cacheLastHit = int(time.time())
+        if self.cacheExpire:
+            self.cacheExpire.cancel()
+        self.cacheExpire = reactor.callLater(cacheLife, self._expireCache)
+
+    def _expireCache(self):
+        log.debug('cache has expired for metric')
+        self.cacheExpire = self.dataCache = None
+        
+    def _cacheAndReturnData(self, data, start, end):
         """ add fetched data to cache """
-        pass
-    
-    def getCacheExtents(self):
-        """ returns the lowest x value and highest x value """
-        pass
-    
-    def fetchData(self, uri, url, headers, cookies, timeout):
-        def onSuccess(result):
+        if not data:
+            log.debug('No data to add to cache')
+            return {}
+        if 'list' not in data:
+            log.debug('unknown data set, not caching')
+            return {}
+        elif not data['list']:
+            log.debug('no values in data set, not caching')
+            return {}
+        else:
+            resultSet = data['list'][0]
+            if 'data' not in resultSet:
+                log.debug('no data in the result set, not caching')
+                return {}
+            else:
+                dataSet = resultSet['data']
+                description = resultSet['description']
+                log.debug('description: %s' % description)
+                #dataMin = description['Min']
+                #dataMax = description['Max']
+                #dataAvg = description['Average']
+                dataUom = resultSet['uom']
+                dataLabel = resultSet['label']
+                #convert x,y pairs in the dataSet into a dictionary
+                minX = maxX = minY = maxY = 0
+                if not 'data' in self.dataCache:
+                    self.dataCache['data'] = {}
+                for x,y in dataSet:
+                    if str(y) == '':
+                        y = 0 # this is not correct, need to check fusionchart/highcharts how to handle this
+                    x = int(x)
+                    y = float(y)
+                    if x < minX: minX = x
+                    if x > maxX: maxX = x
+                    if y < minY: minY = y
+                    if y > maxY: maxY = y
+                    self.dataCache['data'][int(x)] = float(y)
+                self.dataCache['label'] = dataLabel
+                self.dataCache['uom'] = dataUom
+                return self._getCachedData(start, end)
+
+    def _getCachedData(self, start, end):
+        if not self.dataCache:
+            return {}
+        data = self.dataCache['data']
+        dataRange = data.keys()
+        dataRange.sort()
+        # we now have a sorted list of all the x values in the cached data
+        # use bisect to get a set that contains only the requested range
+        # bisect doesn't include exactly matched values, so make our bisect values 1 larger/smaller
+        bStart = int(start) - 1
+        bEnd = int(end) + 1
+        from bisect import bisect
+        rangeStart = bisect(dataRange, bStart)
+        rangeEnd = bisect(dataRange, bEnd)
+        # build the requested data object
+        reqRange = dataRange[rangeStart:rangeEnd]
+        returnSet = {}
+        dataSet = []
+        for valX in reqRange:
+            dataSet.append([valX, data[valX]])
+        returnSet['data'] = dataSet
+        returnSet['label'] = self.dataCache['label']
+        returnSet['uom'] = self.dataCache['uom']
+        return {'list': [returnSet]}
+
+    def _calcBeginEnd(self, end_time, durSet):
+        """ return min and max x for requested time period"""
+        durMod = durSet[0]
+        durLen = durSet[1]
+        durUnit = durSet[2]
+        if durUnit in ('y', 'Y'):
+            durUval = 365.25 * 24 * 60 * 60
+        elif durUnit in ('m', 'M'):
+            durUval = 30.4375 * 24 * 60 * 60
+        elif durUnit in ('w', 'W'):
+            durUval = 7 * 24 * 60 * 60
+        elif durUnit in ('d', 'D'):
+            durUval = 24 * 60 * 60
+        elif durUnit in ('h', 'H'):
+            durUval = 60 * 60
+        else:
+            durUval = 60 * 60
+        if durMod == '+':
+            start = end_time
+            end = start + int(durLen) * durUval
+        else:
+            end = end_time
+            start = end_time - int(durLen) * durUval
+        return start, end
+
+
+            
+    def _fetchRestData(self, uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=0):
+        def onSuccess(result, reqStart, reqEnd):
             #we got back a result from our data fetch request - add it to our cache and set our timestamp
             #return the result to the calling function
-            return result
-        def onFailure(reason):
-            # pass the error on, we don't need to handle it, as the calling function will handle it
-            return reason
-        # add cache check here
-        return rest_api.getInfo(uri, str(url), headers=headers, cookies=cookies, timeout=timeout)
-        # for now just return the query result and let the calling routine handle it. However we will
-        # need to handle the success and failure here (with retries and timeouts) and pass back the 
-        # result once the deferred fires.
-        #d.addCallback(onSuccess).addErrback(onFailure)
+            log.debug('got metric api request back')
+            data = self._cacheAndReturnData(result, reqStart, reqEnd)
+            #log.debug('returning result: %s' % result)
+            return data
+        def onFailure(result, uri=None, api_tool=None, headers=None, cookies=None, reqStart=None, reqEnd=None, timeout=dataTimeout, retry=0):
+            #trap possible errors here
+            l = result.trap(rest_api.ApiError, defer.CancelledError)
+            if l == rest_api.ApiError:
+                retry += 1
+                if uri:
+                    if retry < 3:
+                        log.debug('got api error, retrying')
+                        return self.fetchRestData(uri, api_tool, headers, cookies, reqStart, reqEnd, timeout, retry)
+                    else:
+                        log.debug('too many retries')
+                        return result
+                else:
+                    log.debug ('missing uri')
+                    return result
+            elif l == defer.CancelledError:
+                log.debug('got timeout error')
+                return result
+            else:
+                log.debug('got error: %s' % result)
+                return result
+        #url = '%s?hsm=%s&end=%s&duration=%s' % (api_tool, urllib.quote_plus(uri), end_time, duration)
+        url = '%s?hsm=%s&start=%s&end=%s' % (api_tool, urllib.quote_plus(h_s_m), reqStart, reqEnd)
+        log.debug('requesting %s from %s' % (url, uri))        
+        d = rest_api.getInfo(uri, str(url), headers=headers, cookies=cookies, timeout=timeout)
+        d.addCallback(onSuccess, reqStart, reqEnd).addErrback(onFailure, uri, api_tool, headers, cookies, reqStart, reqEnd, timeout, retry)
+        return d
     
+    def _getLiveData(self, uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout):
+        self.live = self.reactor.callLater(cacheLatency, self._getLiveData, uri, api_tool, h_s_m, int(time.time()), ('-', 1, 'h'), headers, cookies, timeout)
+        return self.getData(uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout)
+    
+    def getData(self, uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout, retry=0, start=None, end=None):
+        log.debug('get maybe cached data called')
+        if (start and end):
+            reqStart = start
+            reqEnd = end
+        else:
+            reqStart, reqEnd = self._calcBeginEnd(end_time, durSet)
+        # check to see if the cache contains all the data we need
+        if 'data' not in self.dataCache:
+            # nothing in the cache!
+            log.debug('cache is empty')
+            cacheResult = None
+        else:
+            log.debug('checking cache contents ')
+            dataKeys = self.dataCache['data'].keys()
+            dataKeys.sort()
+            from bisect import bisect
+            inStart = bisect(dataKeys, reqStart+cacheLatency)
+            inEnd = bisect(dataKeys, reqEnd-cacheLatency)
+            log.debug('inStart: %i' % inStart)
+            log.debug('inEnd: %i' % inEnd)
+            if (inStart and inEnd < len(dataKeys)):
+                #we have a valid cache hit
+                log.debug('valid full cache hit')
+                cacheResult = self._getCachedData(reqStart, reqEnd)
+            else:
+                maxX = dataKeys[-1]
+                minX = dataKeys[0]
+                log.debug('cache does not cover request range')
+                log.debug('requested start %i is %i less than cache min %i' % (reqStart, minX-reqStart, minX))
+                log.debug('request end %i is %i more than cache max %i' % (reqEnd, reqEnd-maxX, maxX))
+                cacheResult = None
+                # we don't have a valid cache hit
+        if cacheResult:
+            log.debug('returning cached data')
+            self._ackCacheHit()
+            return cacheResult
+        else:
+            # figure out source of data
+            dbi = self.parent.parent.parent.getOdw()
+            if dbi:
+                odwHost, odwDb, odwUser, odwPass = dbi
+                hasOdw = False # TODO: odw fetch code doesn't exist
+                #hasOdw = True
+            else:
+                hasOdw = False
+            if hasOdw:
+                log.debug('fetching data from ODW')
+                return self._fetchOdwData()
+            else:
+                log.debug('fetching data from API')
+                return self._fetchRestData(uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=0)
+            
+
+    def makeLive(self, uri, api_tool, h_s_m, headers, cookies, timeout):
+        if self.live:
+            self.live.cancel()
+        if 'data' not in self.dataCache:
+            # we have no cache, grab the last two days of data and turn live on
+            now = int(time.time())
+            tmp = self.getData(uri, api_tool, h_s_m, now, ('-',2,'d'), headers, cookies, timeout)
+        else:
+            # we have cache data, find the last time entry and grab all data more recent than it
+            data = self.dataCache.keys()
+            data.sort()
+            maxX = data[-1]
+            now = int(time.time())
+            if now - maxX > cacheLatency:
+                # TODO: if we don't have odw, then we should grab api data in blocks that match rrd's resolution
+                tmp = self.getData(uri, api_tool, h_s_m, now, ('-', 2, 'd'), headers, cookies, timeout, start=maxX, end=now)
+        self.live = self.reactor.callLater(cacheLatency, self._getLiveData, uri, api_tool, h_s_m, int(time.time()), ('-', 1, 'h'), headers, cookies, timeout)
+        
+    def cancelLive(self):
+        if self.live:
+            self.live.cancel()
+            
 def saveVersionInfo(result, node):
     if 'easyxdm_version' not in result:
         easyxdm = 0
