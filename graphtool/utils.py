@@ -68,6 +68,25 @@ def config_log():
     rfh.setFormatter(fmt)
     rootlogger.addHandler(rfh)
 
+def normalize_data(tdict):
+    if not tdict:
+        return None
+    
+    oldkey = None
+    rdict = {}
+    for key, value in tdict.iteritems():
+        print key , value
+        if not oldkey:
+            oldkey = key
+
+        if (key - oldkey) > 1: 
+            for i in range(oldkey +1, key):
+                rdict[i] = ''
+
+        rdict[key] = value         
+        oldkey = key
+        print rdict
+    return rdict
     
 config = get_config()   
 log=get_logger("utils")
