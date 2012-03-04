@@ -58,6 +58,7 @@ def getMsObject(date_format, x_axis_values, y_axis_series, caption, x_axis_name,
     chart_structure[unicode('showvalues')] = unicode("0")
     chart_structure[unicode('dynamicAxis')] = unicode("1")
     chart_structure[unicode('pixelsPerPoint')] = unicode("5")
+    chart_structure[unicode('connectnulldata')] = unicode("1")
     # create the sytles structure
     styles = {}
     definition = {}
