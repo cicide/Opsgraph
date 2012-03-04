@@ -689,6 +689,32 @@ class Metric(Node):
         d.addCallback(onSuccess, reqStart, reqEnd).addErrback(onFailure, uri, api_tool, headers, cookies, reqStart, reqEnd, timeout, retry)
         return d
     
+    def _fetchOdwData(self, odwHost, odwDb, odwUser, odwPass, hsm, reqStart, reqEnd):
+        def onSuccess(result, reqStart, reqEnd, hsm):
+            log.debug('got metric odw request back')
+            metricResult = result[0]
+            unitResult = result[1][0]
+            if len(result):
+                uom = unitResult
+                label = hsm
+                dataSet = {}
+                dataSet['list'] =[]
+                data = {}
+                data['data'] = metricResult
+                data['uom'] = uom
+                data['label'] = label
+                data['description'] = None
+                dataSet['list'].append(data)
+                return self._cacheAndReturnData(dataSet, reqStart, reqEnd)
+            else:
+                return None
+        def onFailure(reason):
+            return reason
+        host, service, metric = hsm.split('::')
+        d = txdbinterface.loadOdwData(odwHost, odwDb, odwUser, odwPass, host, service, metric, reqStart, reqEnd)
+        d.addCallback(onSuccess, reqStart, reqEnd, hsm).addErrback(onFailure)
+        return d
+    
     def _getLiveData(self, uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout):
         self.live = self.reactor.callLater(cacheLatency, self._getLiveData, uri, api_tool, h_s_m, int(time.time()), ('-', 1, 'h'), headers, cookies, timeout)
         return self.getData(uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout)
@@ -735,13 +761,13 @@ class Metric(Node):
             dbi = self.parent.parent.parent.getOdw()
             if dbi:
                 odwHost, odwDb, odwUser, odwPass = dbi
-                hasOdw = False # TODO: odw fetch code doesn't exist
-                #hasOdw = True
+                #hasOdw = False # TODO: odw fetch code doesn't exist
+                hasOdw = True
             else:
                 hasOdw = False
             if hasOdw:
                 log.debug('fetching data from ODW')
-                return self._fetchOdwData()
+                return self._fetchOdwData(odwHost, odwDb, odwUser, odwPass, h_s_m, reqStart, reqEnd)
             else:
                 log.debug('fetching data from API')
                 return self._fetchRestData(uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=0)

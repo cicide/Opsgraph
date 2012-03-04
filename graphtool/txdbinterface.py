@@ -14,6 +14,7 @@ log = utils.get_logger("txDBmysql")
 ranconnect = 0
 dbpool = None
 query_q=Queue.Queue()
+dbis = {}
 
 class txDBInterface:
     def __init__(self, *query):
@@ -380,6 +381,48 @@ def _loadSuite(txn, dbId):
         return reply
     else:
         return False
+    
+
+def _loadOdwData(txn, host, service, metric, start, end):
+    log.debug('loading odw data')
+    sql = """ SELECT UNIX_TIMESTAMP(pd.datetime), 
+                     pd.value
+              FROM performance_data pd 
+              JOIN performance_labels pl ON pl.id = pd.performance_label 
+              JOIN servicechecks sc ON sc.id = pl.servicecheck 
+              JOIN hosts h ON h.id = sc.host 
+              WHERE h.name = '%s' 
+              AND sc.name = '%s' 
+              AND pl.name = '%s'
+              AND pd.datetime >= FROM_UNIXTIME(%i)
+              AND pd.datetime <= FROM_UNIXTIME(%i)"""
+    sql_args = (host, service, metric, start, end)
+    sql_q = sql % sql_args
+    log.debug(sql_q)
+    txn.execute(sql_q)
+    result = txn.fetchall()
+    sql = """ SELECT pl.units
+              FROM performance_labels pl
+              JOIN servicechecks sc ON sc.id = pl.servicecheck 
+                            JOIN hosts h ON h.id = sc.host 
+                            WHERE h.name = '%s' 
+                            AND sc.name = '%s' 
+                            AND pl.name = '%s'"""
+    sql_args = (host, service, metric)
+    sql_q = sql % sql_args
+    log.debug(sql_q)
+    txn.execute(sql_q)
+    units = txn.fetchall()
+    if result:
+        return result, units[0]
+    else:
+        return False
+
+def loadOdwData(odwHost, odwDb, odwUser, odwPass, host, service, metric, start, end):
+    dbiKey = '%s:%s' % (odwHost, odwDb)
+    if dbiKey not in dbis:
+        dbis[dbiKey] = adbapi.ConnectionPool('oursql', cp_min=3, cp_max=5, cp_noisy=False, cp_reconnect=True, db=odwDb, user=odwUser, passwd=odwPass, host=odwHost, autoreconnect=True, charset=None)
+    return dbis[dbiKey].runInteraction(_loadOdwData, host, service, metric, start,end)
     
 def saveGraph(chart_def, chart_obj, chart_series):
     def onSuccess(result):

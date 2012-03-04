@@ -77,5 +77,5 @@ def getLineChartObject(date_format, graph_settings, data_series, caption, x_axis
                      u'xAxis': xAxis,
                      u'yAxis': yAxis,
                      u'series': series_object}
-    log.debug(chart_object)
+    #log.debug(chart_object)
     return chart_object
