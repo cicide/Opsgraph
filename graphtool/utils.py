@@ -75,7 +75,6 @@ def normalize_data(tdict):
     oldkey = None
     rdict = {}
     for key, value in tdict.iteritems():
-        print key , value
         if not oldkey:
             oldkey = key
 
@@ -83,9 +82,8 @@ def normalize_data(tdict):
             for i in range(oldkey +1, key):
                 rdict[i] = ''
 
-        rdict[key] = value         
+        rdict[key] = value
         oldkey = key
-        print rdict
     return rdict
     
 config = get_config()   

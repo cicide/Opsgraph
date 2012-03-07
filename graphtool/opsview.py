@@ -16,6 +16,7 @@ graph_duration = '%s%s' % (utils.config.get('graph', 'duration_length'), utils.c
 local_ip = utils.config.get('general', 'local_ip')
 event_full_load_period = int(utils.config.get('events', 'full_load_period'))
 event_inc_load_period = int(utils.config.get('events', 'incremental_load_period'))
+timeRoundBase = int(utils.config.get('graph', 'round_time'))
 
 node_list = {}
 event_type_list = ['outage', 'event']
@@ -590,7 +591,11 @@ class Metric(Node):
                 for x,y in dataSet:
                     if str(y) == '':
                         y = 0 # this is not correct, need to check fusionchart/highcharts how to handle this
-                    x = int(x)
+                    if timeRoundBase:
+                        # round all x values to the nearest timeRoundBase (from round_time value in the config file)
+                        x = int(timeRoundBase * round(float(x)/timeRoundBase))
+                    else:
+                        x = int(x)
                     y = float(y)
                     if x < minX: minX = x
                     if x > maxX: maxX = x
