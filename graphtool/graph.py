@@ -2,6 +2,7 @@
 
 import time, datetime
 import utils, fusioncharts, highcharts, txdbinterface
+from itertools import chain
 from twisted.internet import defer
 
 log = utils.get_logger("GraphService")
@@ -592,7 +593,12 @@ class chart(object):
             return []
         key_list = []
         for key in data.keys():
-            key_list.append(key)
+            if data[key]:
+                key_list.append(key)
+        if not key_list:
+            return []
+        # if this is rrdfetch data, the first object per series is a ResultSet object
+        # if this is rest/graph data, the first object is a list
         if 'ResultSet' in data[key_list[0]]:
             #do data normalization
             data_series = []
@@ -633,10 +639,16 @@ class chart(object):
                 log.debug('grabbing data dictionary from series')
                 if len(data[series]['list']):
                     series_list = data[series]['list'][0]
-                    log.debug('grabbing data from list (lines)')
-                    data_record = series_list['data']
-                    for record in data_record:
-                        data_dict[str(record[0])] = record[1]
+                    if 'data' in series_list:
+                        log.debug('grabbing raw data from list (lines)')
+                        data_record = series_list['data']
+                        for record in data_record:
+                            data_dict[str(record[0])] = record[1]
+                    elif 'cacheData' in series_list:
+                        log.debug('grabbing cached data from list (dict)')
+                        data_dict = series_list['cacheData']
+                    else:
+                        log.debug('unknown series data type')
                     #log.debug(data_dict)
                     series_list['data'] = data_dict
                 else:
@@ -644,8 +656,6 @@ class chart(object):
                 data_series.append(series_list)
             return data_series
         
-        # if this is rrdfetch data, the first object per series is a ResultSet object
-        # if this is rest/graph data, the first object is a list
     
     def calculateGraphPeriod(self):
         # Calculate the end_time and duration from the start_time and duration provided by the user
@@ -713,16 +723,26 @@ class chart(object):
             #   different series might not have data for the same time values
             # To do: make sure x axis data has equal increments for valid graph display
             time_values = []
+            log.debug('figuring out time values')
+            #for series in data_series:
+                #for time_value in series['data']:
+                    #if int(time_value) not in time_values:
+                        #time_values.append(int(time_value))
+            tvList = []
             for series in data_series:
-                for time_value in series['data']:
-                    if int(time_value) not in time_values:
-                        time_values.append(int(time_value))
+                tvList.append(series['data'].keys())
+            # chain the lists of series x values into a single list
+            # set gives us in unordered set of objects, removing duplicates
+            # convert it back to a list for our use
+            time_values = list(iter(set(chain(*tvList))))
             if not len(time_values):
                 log.error('got no time values')
             else:
+                log.debug('sorting time values')
                 #order the time values sequentially
                 time_values.sort()
                 #log.debug('data_series: %s' % data_series)
+            log.debug('returning time values')
             return time_values, data_series
         else:
             return None
