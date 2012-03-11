@@ -590,18 +590,21 @@ class Metric(Node):
                     self.dataCache['data'] = {}
                 for x,y in dataSet:
                     if str(y) == '':
-                        y = 0 # this is not correct, need to check fusionchart/highcharts how to handle this
+                        y = None # this is not correct, need to check fusionchart/highcharts how to handle this
                     if timeRoundBase:
                         # round all x values to the nearest timeRoundBase (from round_time value in the config file)
                         x = int(timeRoundBase * round(float(x)/timeRoundBase))
                     else:
                         x = int(x)
-                    y = float(y)
-                    if x < minX: minX = x
-                    if x > maxX: maxX = x
-                    if y < minY: minY = y
-                    if y > maxY: maxY = y
-                    self.dataCache['data'][int(x)] = float(y)
+                        if x < minX: minX = x
+                        if x > maxX: maxX = x
+                    if y:
+                        y = float(y)
+                        if y < minY: minY = y
+                        if y > maxY: maxY = y
+                    else:
+                        y = '' # this allows fusioncharts and highcharts to recognize this is missing data
+                    self.dataCache['data'][x] = y
                 self.dataCache['label'] = dataLabel
                 self.dataCache['uom'] = dataUom
                 return self._getCachedData(start, end)
@@ -623,10 +626,13 @@ class Metric(Node):
         # build the requested data object
         reqRange = dataRange[rangeStart:rangeEnd]
         returnSet = {}
-        dataSet = []
-        for valX in reqRange:
-            dataSet.append([valX, data[valX]])
-        returnSet['data'] = dataSet
+        # we were returning a list that we then turned back into a dict, return a dict instead
+        #dataSet = []
+        #for valX in reqRange:
+        #    dataSet.append([valX, data[valX]])
+        #returnSet['data'] = dataSet
+        dataSet = {str(key): data[key] for key in reqRange}
+        returnSet['cacheData'] = dataSet
         returnSet['label'] = self.dataCache['label']
         returnSet['uom'] = self.dataCache['uom']
         return {'list': [returnSet]}

@@ -13,6 +13,7 @@ def getMsObject(date_format, x_axis_values, y_axis_series, caption, x_axis_name,
     # Create the x-axis and y-axis structures needed by fusioncharts
     timeset = []
     datasets = {}
+    tvProcessStart = time.time()
     for time_value in time_values:
         # format the time value based on the configured data_format
         time_obj = datetime.datetime.fromtimestamp(int(time_value))
@@ -31,6 +32,8 @@ def getMsObject(date_format, x_axis_values, y_axis_series, caption, x_axis_name,
             else:
                 log.debug('missing value for time step')
                 datasets[label].append({unicode('value'): unicode('')})
+    tvProcessTime = time.time() - tvProcessStart
+    log.debug('total series processing time: %s' % tvProcessTime)
     # We now have our x-axis and y-axis data, but the y-data isn't correctly formatted yet
     data_structure = []
     time_structure = []
