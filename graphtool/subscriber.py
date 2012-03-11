@@ -452,6 +452,9 @@ class subscriber(object):
     
     @_setTouchTime_decorator
     def getEventList(self, time_values, chart):
+        if not len(time_values):
+            # no time values sent, return empty event object
+            return {}
         log.debug('starting events building')
         chart.setEventList([])
         event_nodes = []
@@ -582,7 +585,8 @@ class subscriber(object):
             api_uri = '%s::%s::%s' % (host, service, metric)
             chart.setSeriesUri(row, data_node, api_uri)
             end_time,duration = chart.calculateGraphPeriod()
-            result = opsview.node_list[data_node].fetchData(api_uri, end_time, duration, creds, cookies)
+            #result = opsview.node_list[data_node].fetchData(api_uri, end_time, duration, creds, cookies, (host, service, metric))
+            result = defer.maybeDeferred(opsview.node_list[data_node].fetchData, api_uri, end_time, duration, creds, cookies, (host, service, metric), (chart.getChartDurationModifier(), chart.getChartDurationLength(), chart.getChartDurationUnit()))
             result.addCallback(onSeriesSuccess, row)
             ds.append(result)
         d = defer.DeferredList(ds, consumeErrors=False)
