@@ -85,6 +85,29 @@ def normalize_data(tdict):
         rdict[key] = value
         oldkey = key
     return rdict
-    
+
+def reduce_data(tdict, size):                                                                                                                       
+    if len(tdict) <= size:
+        return tdict
+    skip = len(tdict)/size - 1
+    ret = {}
+    oldkeys = []
+    for k,v in tdict.iteritems():
+       if len(oldkeys)<skip:
+           oldkeys.append(k)
+           continue
+       oldkeys.append(k)
+       sumval = 0
+       for var in oldkeys:
+           sumval = tdict[var] + sumval
+       ret[oldkeys[0]] = sumval/len(oldkeys)
+       oldkeys = []
+    if len(oldkeys) != 0:
+        sumval = 0
+        for var in oldkeys:
+            sumval = tdict[var] + sumval
+        ret[oldkeys[0]] = sumval/len(oldkeys)
+    return ret
+
 config = get_config()   
 log=get_logger("utils")
