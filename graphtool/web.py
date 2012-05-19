@@ -2,7 +2,7 @@
 
 from zope.interface import implements, Interface, Attribute
 from twisted.python import filepath, util
-from twisted.internet import defer
+from twisted.internet import defer, ssl
 from twisted.application import internet
 from twisted.cred import checkers, error as credError
 from twisted.cred.portal import Portal, IRealm
@@ -22,6 +22,9 @@ img_dir = os.path.join(os.path.split(__file__)[0],'image')
 js_dir = os.path.join(os.path.split(__file__)[0],'javascript')
 
 httpport = utils.config.getint("general", "httpport")
+sslport = utils.config.getint("general", "sslport")
+sslPrivKey = utils.config.get("general", "sslKey")
+sslCaCert = utils.config.get("general", "sslCert")
 auto_series = utils.config.get("graph", "autocomplete_series")
 modal_close = utils.config.get("general", "dialog_autoclose")
 if modal_close in (trueVals):
@@ -1402,6 +1405,12 @@ def wrapAuthorized(site):
 site = wrapAuthorized(RootPage())
 
 def getService():
+    services = []
     service = internet.TCPServer(httpport, site)
     service.setName("WEBService")
-    return service
+    services.append(service)
+    if sslport:
+        sslContext = ssl.DefaultOpenSSLContextFactory(sslPrivKey,sslCaCert,)
+        service = internet.SSLServer(sslport,site,contextFactory = sslContext)
+        services.append(service)
+    return services
