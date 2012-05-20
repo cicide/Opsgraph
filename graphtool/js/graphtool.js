@@ -262,6 +262,16 @@ Extern.ExternWidget.methods(
         theRegexpActionCell.appendChild(theRegexpActionCellSubmit);
         theRegexpActionCell.setAttribute('id', 'regexp_submit_cell');
         theRegexpSelectRow.appendChild(theRegexpActionCell);
+
+        //The Reset button
+        var theResetButton = document.createElement('input');
+        theResetButton.setAttribute('type', 'button');
+        theResetButton.setAttribute('value', 'Reset');
+        theResetButton.onclick = function() {self.onResetClick()};
+
+        // Reset button placed next to matches to graph button
+        theRegexpSelectRow.appendChild(theResetButton);
+
         //theAccordianDiv.appendChild(theRegexpSelectRow);
         tbo.appendChild(theRegexpSelectRow);
         
@@ -403,6 +413,34 @@ Extern.ExternWidget.methods(
         return false;
     },
     
+    // Handle clicking of reset button
+    function onResetClick(self) {
+        self.callRemote('resetGraphValues').addCallback(
+            function(result) {
+                self.updateRegexpButton(result);
+                var theNodeRegExpText = document.getElementById('nodeRegexp');
+                theNodeRegExpText.value = '.*';
+                var theHostRegExpText = document.getElementById('hostRegexp');
+                theHostRegExpText.value = '.*';
+                var theServiceRegExpText = document.getElementById('serviceRegexp');
+                theServiceRegExpText.value = '.*';
+                var theMetricRegExpText = document.getElementById('metricRegexp');
+                theMetricRegExpText.value = '.*';
+            }
+        );
+    },
+
+    function removeAllRows(self, rowcount) {
+
+        var graph_table = document.getElementById("graphSelectTableBody");
+        var num_rows = graph_table.rows.length
+        while(num_rows > 2){
+            graph_table.deleteRow(0);
+            num_rows--
+        }
+        self.callRemote('resetNodeSelection');
+    },
+
     function onRegexpSelect(self) {
         self.callRemote('addRegexpSelect').addCallback(
             function(result) {
