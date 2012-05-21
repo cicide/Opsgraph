@@ -9,11 +9,32 @@ def getMsObject(date_format, x_axis_values, y_axis_series, caption, x_axis_name,
     #for now we will assume the x axis is a time axis...
     time_values = x_axis_values
     data_series = y_axis_series
-    log.debug('time values is %i long' % len(time_values))
+    tvLen = len(time_values)
+    log.debug('time values is %i long' % tvLen)
     # Create the x-axis and y-axis structures needed by fusioncharts
     timeset = []
     datasets = {}
     tvProcessStart = time.time()
+    # fusioncharts doesn't handle different time steps, however, with cached data, we can get different
+    # time step values, so we need to go through and ensure we have equal time steps.
+    log.debug('******* time series start: %i' % int(time_values[0]))
+    log.debug('******* time series stop: %i' % int(time_values[len(time_values)-1]))
+    tvStartDiff = int(time_values[1]) - int(time_values[0])
+    tvEndDiff = int(time_values[-1]) - int(time_values[-2])
+    if tvStartDiff != tvEndDiff:
+        # we have different time intervals - normalize
+        log.debug('mixed time intervals detected')
+        tvDiff = min([tvStartDiff,tvEndDiff])
+        tvRange = int(time_values[-1]) - int(time_values[0])
+        tvDiffTest = tvRange/tvDiff
+        if type(tvDiffTest) == int:
+            log.debug('we have a clean interval we can use')
+            newTimeValues = range(int(time_values[0]),int(time_values[-1])+1, tvDiff)
+            time_values = newTimeValues
+        else:
+            log.debug('UNCLEAN interval detected')
+    else:
+        log.debug('time intervals are fine')
     for time_value in time_values:
         # format the time value based on the configured data_format
         time_obj = datetime.datetime.fromtimestamp(int(time_value))
