@@ -1481,9 +1481,10 @@ site = wrapAuthorized(RootPage(),LoginForm())
 
 def getService():
     services = []
-    service = internet.TCPServer(httpport, site)
     service.setName("WEBService")
-    services.append(service)
+    if httpport:
+        service = internet.TCPServer(httpport, site)
+        services.append(service)
     if sslport:
         sslContext = ssl.DefaultOpenSSLContextFactory(sslPrivKey,sslCaCert,)
         service = internet.SSLServer(sslport,site,contextFactory = sslContext)
