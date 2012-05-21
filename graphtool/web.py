@@ -1352,7 +1352,36 @@ class ExternalElement(athena.LiveElement):
         self.getOptions('node_options')
         return dhsmIndexedList
     
-    
+    def resetNodeSelection(self):
+        log.debug("resetNodeSelection called ")
+        rowId      = unicode('node_options')
+        def_option = []
+        node_list  = []
+        nodes      = self.subscriber.getAuthNodes()
+        def_option = [unicode('Select a Node'), unicode('select_an_option')]
+        for node in nodes:
+            node_list.append(unicode(node))
+        selectId   = unicode('node')
+        self.callRemote('addSelect', node_list, rowId, selectId, def_option)
+
+    def removeAllRows(self):
+        log.debug('got request to remove all rows')
+        self.chart.series = []
+        self.chart.metricSeries = []
+        self.chart.seriesTracker = {}
+        rowCount = self.chart.seriesCounter
+        self.chart.seriesCounter = 0
+
+        self.callRemote('removeAllRows', rowCount)
+
+    def resetGraphValues(self):
+        # Reset all selections on graph page
+        log.debug('resetGraphValues(): Called')
+        matches = self._initRegexp('.*', '.*', '.*', '.*')
+        log.debug("resetGraphValues(): matches = %s"%str(matches))
+        self.removeAllRows()
+        return matches
+
     saveGraph = expose(saveGraph)
     initialize = expose(initialize)
     makeGraph = expose(makeGraph)
@@ -1364,6 +1393,9 @@ class ExternalElement(athena.LiveElement):
     setRegexp = expose(_setRegexp)
     addRegexpSelect = expose(_addRegexpSelect)
     getRegexMatches = expose(_getRegexMatches)
+    resetGraphValues = expose(resetGraphValues)
+    resetNodeSelection = expose(resetNodeSelection)
+    removeAllRows = expose(removeAllRows)
     jsClass = u'Extern.ExternWidget'
     _tpl = filepath.FilePath(__file__).parent().child('templates').child('athena_livepage.html')
     docFactory = loaders.xmlfile(_tpl.path)
