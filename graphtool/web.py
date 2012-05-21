@@ -10,7 +10,7 @@ from twisted.cred.credentials import IUsernamePassword, IAnonymous
 from nevow import appserver, athena, loaders, rend, inevow, guard, inevow, url, static, tags as T
 from nevow.inevow import ISession, IRequest
 from nevow.athena import expose
-import random, os, time, string
+import random, os, time, string, json
 import utils, subscriber
 
 log = utils.get_logger("WEBService")
@@ -74,14 +74,19 @@ class opsviewWebChecker:
 class opsviewRealm(object):
     implements(IRealm)
     
-    def __init__(self, pageResource):
+    def __init__(self, pageResource, anonResource):
         self.pageResource = pageResource
+        self.anonResource = anonResource
         
     def requestAvatar(self, avatarId, mind, *interfaces):
         log.debug('in requestAvatar')
         for iface in interfaces:
+            #if avatarId is checkers.ANONYMOUS:
+                #resc = LoginForm()
+                #resc.realm = self
+                #return (inevow.IResource, resc, lambda: None)
             if avatarId is checkers.ANONYMOUS:
-                resc = LoginForm()
+                resc = self.anonResource
                 resc.realm = self
                 return (inevow.IResource, resc, lambda: None)
             else:
@@ -165,6 +170,22 @@ class TopTabs(rend.Fragment):
     
 class LoginForm(rend.Page):
     """ Minimalist Login Page"""
+    
+    def __init__(self):
+        rend.Page.__init__(self)
+        self.remember(self, inevow.ICanHandleNotFound)
+    
+    def renderHTTP_notFound(self, ctx):
+            request = inevow.IRequest(ctx)
+            request.redirect('/')
+            return ''
+
+# These are for anonymous viewing
+    #def child_viewGraph(self, ctx):
+        #return ViewGraphPage()
+    
+    #def child_viewSuite(self, ctx):
+        #return ViewSuitesPage()
     
     def _renderErrors(self, ctx, data):
         log.debug('login page context: %s' % ctx)
@@ -1298,12 +1319,32 @@ class ExternalElement(athena.LiveElement):
     def _setRegexp(self, item, patt):
         log.debug('Setting regexp %s to %s' % (item, patt))
         tmp = self.subscriber.setRegexp(self.chart, item, patt)
-        cellId = self.regexpCellId[item]
+        cellId = self.regexpCellId[str(item)]
         if not tmp:
             self.callRemote('displayError', unicode('Invalid regexp pattern'), cellId)
         else:
             self.callRemote('clearError', unicode('Invalid regexp pattern'), cellId)
         return unicode(self.subscriber.getRegexpMatchCount(self.chart)[0])
+    
+    def _getRegexMatches(self, item, patt):
+        log.debug('Setting regexp %s to %s' % (item, patt))
+        tmp = self.subscriber.setRegexp(self.chart, item, patt)
+        cellId = self.regexpCellId[str(item)]
+        if not tmp:
+            self.callRemote('displayError', unicode('Invalid regexp pattern'), cellId)
+        else:
+            self.callRemote('clearError', unicode('Invalid regexp pattern'), cellId)
+        result = self.subscriber.getRegexpMatchCount(self.chart)
+        match_count = result[0]
+        dhsmList = result[1]
+        itemPos = 'dhsm'.index(item)
+        listResult = []
+        for row in dhsmList:
+            if row[itemPos] not in listResult:
+                listResult.append(row[itemPos])
+        returnResult = [match_count,listResult]
+        log.debug(returnResult)
+        return unicode(json.dumps(returnResult))
     
     def _addRegexpSelect(self):
         dhsmIndexedList = self.subscriber.addRegexpSelect(self.chart)
@@ -1322,6 +1363,7 @@ class ExternalElement(athena.LiveElement):
     initRegexp = expose(_initRegexp)
     setRegexp = expose(_setRegexp)
     addRegexpSelect = expose(_addRegexpSelect)
+    getRegexMatches = expose(_getRegexMatches)
     jsClass = u'Extern.ExternWidget'
     _tpl = filepath.FilePath(__file__).parent().child('templates').child('athena_livepage.html')
     docFactory = loaders.xmlfile(_tpl.path)
@@ -1386,9 +1428,10 @@ def getRandString(length):
     rndStr = "".join([random.choice(rndset) for i in xrange(length)])
     return rndStr
 
-def wrapAuthorized(site):
+def wrapAuthorized(site, anonSite):
     site = inevow.IResource(site)
-    realmObject = opsviewRealm(site)
+    anonSite = inevow.IResource(anonSite)
+    realmObject = opsviewRealm(site, anonSite)
     portalObject = Portal(realmObject)
     myChecker = opsviewWebChecker()
     #Allow anonymous access to the login page
@@ -1402,7 +1445,7 @@ def wrapAuthorized(site):
     return site
     
 
-site = wrapAuthorized(RootPage())
+site = wrapAuthorized(RootPage(),LoginForm())
 
 def getService():
     services = []

@@ -219,8 +219,9 @@ Extern.ExternWidget.methods(
         theNodeRegexp.setAttribute('id', 'nodeRegexp');
         theNodeRegexp.value = '.*';
         theNodeRegexp.name = 'd';
-        theNodeRegexp.onkeyup = function () {self.onChangeRegexp(theNodeRegexp)};
+        //theNodeRegexp.onkeyup = function () {self.onChangeRegexp(theNodeRegexp)};
         theNodeRegexpCell.appendChild(theNodeRegexp);
+        var nodeRegexCache = {};
         theRegexpSelectRow.appendChild(theNodeRegexpCell)
         // create the host input cell
         var theHostRegexpCell = document.createElement('td');
@@ -229,8 +230,9 @@ Extern.ExternWidget.methods(
         theHostRegexp.setAttribute('id', 'hostRegexp');
         theHostRegexp.value = '.*';
         theHostRegexp.name = 'h';
-        theHostRegexp.onkeyup = function () {self.onChangeRegexp(theHostRegexp)};
+        //theHostRegexp.onkeyup = function () {self.onChangeRegexp(theHostRegexp)};
         theHostRegexpCell.appendChild(theHostRegexp);
+        var hostRegexCache = {};
         theRegexpSelectRow.appendChild(theHostRegexpCell);
         // create the service input cell
         var theServiceRegexpCell = document.createElement('td');
@@ -239,8 +241,9 @@ Extern.ExternWidget.methods(
         theServiceRegexp.setAttribute('id', 'serviceRegexp');
         theServiceRegexp.value = '.*';
         theServiceRegexp.name = 's';
-        theServiceRegexp.onkeyup = function () {self.onChangeRegexp(theServiceRegexp)};
+        //theServiceRegexp.onkeyup = function () {self.onChangeRegexp(theServiceRegexp)};
         theServiceRegexpCell.appendChild(theServiceRegexp);
+        var serviceRegexCache = {};
         theRegexpSelectRow.appendChild(theServiceRegexpCell);
         //create the metric input cell
         var theMetricRegexpCell = document.createElement('td');
@@ -249,8 +252,9 @@ Extern.ExternWidget.methods(
         theMetricRegexp.setAttribute('id', 'metricRegexp');
         theMetricRegexp.value = '.*';
         theMetricRegexp.name = 'm';
-        theMetricRegexp.onkeyup = function () {self.onChangeRegexp(theMetricRegexp)};
+        //theMetricRegexp.onkeyup = function () {self.onChangeRegexp(theMetricRegexp)};
         theMetricRegexpCell.appendChild(theMetricRegexp);
+        var metricRegexCache = {};
         theRegexpSelectRow.appendChild(theMetricRegexpCell);
         // create the action cell and hide it
         var theRegexpActionCell = document.createElement('td');
@@ -395,6 +399,103 @@ Extern.ExternWidget.methods(
         theSection.appendChild(theBigTable);
         //var $jq = jQuery.noConflict();
         //$jq("#accordian").accordion();
+        var $jq = jQuery.noConflict();
+        $jq("#nodeRegexp").autocomplete({
+            minLength: 1,
+            source: function (request, response) {
+                var nodeTerm = request.term;
+                if ( nodeTerm in nodeRegexCache ) {
+                    response( nodeRegexCache[ nodeTerm ][1] );
+                    self.updateRegexpButton( nodeRegexCache[ nodeTerm ][0] );
+                    return;
+                }
+                lastDat = self.callRemote('getRegexMatches', 'd', nodeTerm).addCallback(
+                    function(result) {
+                        var obj = jQuery.parseJSON(result)
+                        data = obj[1];
+                        matches = obj[0];
+                        nodeRegexCache[ nodeTerm ] = obj;
+                            response (data);
+                            self.updateRegexpButton(matches);
+                    }
+                )
+            },
+            select: function(event, ui) {
+                self.callRemote('setRegexp', 'd', ui.item.value)
+            }
+        });
+        $jq("#hostRegexp").autocomplete({
+            minLength: 1,
+            source: function (request, response) {
+                var hostTerm = request.term;
+                if ( hostTerm in hostRegexCache ) {
+                    response( hostRegexCache[ hostTerm ][1] );
+                    self.updateRegexpButton( hostRegexCache[ hostTerm ][0] );
+                    return;
+                }
+                lastDat = self.callRemote('getRegexMatches', 'h', hostTerm).addCallback(
+                    function(result) {
+                        var obj = jQuery.parseJSON(result)
+                        data = obj[1];
+                        matches = obj[0];
+                        hostRegexCache[ hostTerm ] = obj;
+                            response (data);
+                            self.updateRegexpButton(matches);
+                    }
+                )
+            },
+            select: function(event, ui) {
+                self.callRemote('setRegexp', 'h', ui.item.value)
+            }
+        });
+        $jq("#serviceRegexp").autocomplete({
+            minLength: 1,
+            source: function (request, response) {
+                var serviceTerm = request.term;
+                if ( serviceTerm in serviceRegexCache ) {
+                    response( serviceRegexCache[ serviceTerm ][1] );
+                    self.updateRegexpButton( serviceRegexCache[ serviceTerm ][0] );
+                    return;
+                }
+                lastDat = self.callRemote('getRegexMatches', 's', serviceTerm).addCallback(
+                    function(result) {
+                        var obj = jQuery.parseJSON(result)
+                        data = obj[1];
+                        matches = obj[0];
+                        serviceRegexCache[ serviceTerm ] = obj;
+                            response (data);
+                            self.updateRegexpButton(matches);
+                    }
+                )
+            },
+            select: function(event, ui) {
+                self.callRemote('setRegexp', 's', ui.item.value)
+            }
+        });
+        $jq("#metricRegexp").autocomplete({
+            minLength: 1,
+            source: function (request, response) {
+                var metricTerm = request.term;
+                if ( metricTerm in metricRegexCache ) {
+                    response( metricRegexCache[ metricTerm ][1] );
+                    self.updateRegexpButton( metricRegexCache[ metricTerm ][0] );
+                    return;
+                }
+                lastDat = self.callRemote('getRegexMatches', 'm', metricTerm).addCallback(
+                    function(result) {
+                        var obj = jQuery.parseJSON(result)
+                        data = obj[1];
+                        matches = obj[0];
+                        metricRegexCache[ metricTerm ] = obj;
+                            response (data);
+                            self.updateRegexpButton(matches);
+                    }
+                )
+            },
+            select: function(event, ui) {
+                self.callRemote('setRegexp', 'm', ui.item.value)
+            }
+        });
         self.callRemote('getOptions', 'node_options');
     },
 
