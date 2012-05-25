@@ -24,7 +24,9 @@ graphtoolService.setServiceParent(application)
 def addServices():
 
     import web
-    graphtoolService.addService(web.getService())
+    webServices = web.getService()
+    for service in webServices:
+        graphtoolService.addService(service)
     import opsview
     #import rest_api - imported in opsview
 
