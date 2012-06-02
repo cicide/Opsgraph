@@ -99,10 +99,14 @@ class Domain(Node):
             log.debug('Got Event Types result for Node %s: ' % self.name)
             log.debug(result)
             self.event_type_list = []
-            for item in result:
-                if item[0] not in event_type_list:
-                    event_type_list.append(item[0])
-                self.event_type_list.append(item[0])
+            if result and type(result) != type(bool()):            
+                for item in result:
+                    if item[0] not in event_type_list:
+                        event_type_list.append(item[0])
+                    self.event_type_list.append(item[0])
+            else:
+                log.debug("onTypeSuccess: Got no event types")
+  
         def onEventsSuccess(result):
             log.debug('Got Event List result for Node %s: ' % self.name)
             log.debug(result)
