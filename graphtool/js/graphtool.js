@@ -542,7 +542,8 @@ Extern.ExternWidget.methods(
         self.callRemote('resetNodeSelection');
     },
 
-    function onRegexpSelect(self) {
+
+    function addRegExpSelect(self) {
         self.callRemote('addRegexpSelect').addCallback(
             function(result) {
                 var dhsmLength = result.length
@@ -554,6 +555,25 @@ Extern.ExternWidget.methods(
         );
         return false;
     },
+
+    function onRegexpSelect(self) {
+        self.callRemote('checkRegexpSelect').addCallback(
+            function(result) {
+                var dhsmLength = result
+                if (dhsmLength < 15){
+                    self.addRegExpSelect()
+                } else {
+                    var ans=confirm("Are you sure you want to add " + dhsmLength + " graphs?");
+                    if (ans==true)
+                    {
+                       self.addRegExpSelect();
+                    } 
+                }
+            }
+        );
+        return false;
+    },
+
     
     function generateGraph(self) {
         //self.callRemote('makeGraph');

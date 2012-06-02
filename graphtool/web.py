@@ -1346,9 +1346,12 @@ class ExternalElement(athena.LiveElement):
         log.debug(returnResult)
         return unicode(json.dumps(returnResult))
     
+    def checkRegexpSelect(self):
+        dhsmCount, dhsm = self.subscriber.getRegexpMatchCount(self.chart)
+        return dhsmCount
+        
     def _addRegexpSelect(self):
         dhsmIndexedList = self.subscriber.addRegexpSelect(self.chart)
-        log.debug(dhsmIndexedList)
         self.getOptions('node_options')
         return dhsmIndexedList
     
@@ -1392,6 +1395,7 @@ class ExternalElement(athena.LiveElement):
     initRegexp = expose(_initRegexp)
     setRegexp = expose(_setRegexp)
     addRegexpSelect = expose(_addRegexpSelect)
+    checkRegexpSelect = expose(checkRegexpSelect)
     getRegexMatches = expose(_getRegexMatches)
     resetGraphValues = expose(resetGraphValues)
     resetNodeSelection = expose(resetNodeSelection)
@@ -1481,9 +1485,9 @@ site = wrapAuthorized(RootPage(),LoginForm())
 
 def getService():
     services = []
-    service.setName("WEBService")
     if httpport:
         service = internet.TCPServer(httpport, site)
+        service.setName("WEBService")
         services.append(service)
     if sslport:
         sslContext = ssl.DefaultOpenSSLContextFactory(sslPrivKey,sslCaCert,)
