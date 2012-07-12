@@ -431,7 +431,11 @@ Extern.ExternWidget.methods(
                 )
             },
             select: function(event, ui) {
-                self.callRemote('setRegexp', 'd', ui.item.value)
+                self.callRemote('setRegexp', 'd', ui.item.value).addCallback(
+                    function(result) {
+                        self.updateRegexpButton(result);
+                    }
+                );
             }
         });
         $jq("#hostRegexp").autocomplete({
@@ -455,7 +459,11 @@ Extern.ExternWidget.methods(
                 )
             },
             select: function(event, ui) {
-                self.callRemote('setRegexp', 'h', ui.item.value)
+                self.callRemote('setRegexp', 'h', ui.item.value).addCallback(
+                    function(result) {
+                        self.updateRegexpButton(result);
+                    }
+                );
             }
         });
         $jq("#serviceRegexp").autocomplete({
@@ -479,7 +487,11 @@ Extern.ExternWidget.methods(
                 )
             },
             select: function(event, ui) {
-                self.callRemote('setRegexp', 's', ui.item.value)
+                self.callRemote('setRegexp', 's', ui.item.value).addCallback(
+                    function(result) {
+                        self.updateRegexpButton(result);
+                    }
+                );
             }
         });
         $jq("#metricRegexp").autocomplete({
@@ -503,7 +515,11 @@ Extern.ExternWidget.methods(
                 )
             },
             select: function(event, ui) {
-                self.callRemote('setRegexp', 'm', ui.item.value)
+                self.callRemote('setRegexp', 'm', ui.item.value).addCallback(
+                    function(result) {
+                        self.updateRegexpButton(result);
+                    }
+                );
             }
         });
         self.callRemote('getOptions', 'node_options');

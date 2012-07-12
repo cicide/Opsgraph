@@ -1150,7 +1150,8 @@ class ExternalElement(athena.LiveElement):
                     if prev_node in nodes:
                         tmp = nodes.remove(prev_node)
                 else:
-                    def_option = [unicode('Select a Node'), unicode('select_an_option')]
+                    if nodes and len(nodes) > 1:
+                        def_option = [unicode('Select a Node'), unicode('select_an_option')]
                 for node in nodes:
                     log.debug('adding node %s to node select' % node)
                     node_list.append(unicode(node))
@@ -1327,7 +1328,7 @@ class ExternalElement(athena.LiveElement):
         return unicode(self.subscriber.getRegexpMatchCount(self.chart)[0])
     
     def _getRegexMatches(self, item, patt):
-        log.debug('Setting regexp %s to %s' % (item, patt))
+        log.debug('Getting list of choices for regexp %s to %s' % (item, patt))
         tmp = self.subscriber.setRegexp(self.chart, item, patt)
         cellId = self.regexpCellId[str(item)]
         if not tmp:
@@ -1361,7 +1362,8 @@ class ExternalElement(athena.LiveElement):
         def_option = []
         node_list  = []
         nodes      = self.subscriber.getAuthNodes()
-        def_option = [unicode('Select a Node'), unicode('select_an_option')]
+        if nodes and len(nodes) > 1:
+            def_option = [unicode('Select a Node'), unicode('select_an_option')]
         for node in nodes:
             node_list.append(unicode(node))
         selectId   = unicode('node')

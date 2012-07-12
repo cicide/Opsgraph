@@ -418,7 +418,7 @@ class subscriber(object):
     def getRegexpMatchCount(self, chart):
         tmp = chart.getRegexp()
         dPatt, hPatt, sPatt, mPatt = tmp
-        regexpMatch = opsview.search(opsview.node_list, dPatt, hPatt, sPatt, mPatt)
+        regexpMatch = opsview.search(self.auth_node_list, dPatt, hPatt, sPatt, mPatt)
         dhsmList = self.getDhsmListFromDict(chart, regexpMatch)
         return (len(dhsmList),dhsmList[:])
     
@@ -571,7 +571,11 @@ class subscriber(object):
             log.debug('trying to grab four items from %s' % chart.getSeriesTracker(row))
             log.debug('subscribers auth_list is %s' % self.auth_node_list)
             data_node, host, service, metric = chart.getSeriesTracker(row)
-            cred_token, cred_time = self.auth_node_list[data_node]
+            try:
+                cred_token, cred_time = self.auth_node_list[data_node]
+            except:
+                log.error("subscriber: makeGraph: Cannot get cred_token for data_node=%s"%data_node)
+                continue
             if int(time.time()) > int(cred_time + reauth_timeout):
                 # if we have exceeded our auth time, force a re-authentication.
                 d = self.authenticateNode(data_node)

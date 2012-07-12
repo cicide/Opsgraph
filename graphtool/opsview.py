@@ -837,8 +837,7 @@ def search(domainlist, dpattern=None, hpattern=None, spattern=None, mpattern=Non
     if not mpattern:
         mpattern= "" 
     dpat = re.compile(dpattern, re.I)
-
-    for key in node_list:
+    for key in domainlist:
         hList = {}
         if dpat.search(key):
             hList = node_list[key].searchChildren(hpattern)
