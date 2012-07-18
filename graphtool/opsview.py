@@ -590,6 +590,10 @@ class Metric(Node):
                 dataLabel = resultSet['label']
                 #convert x,y pairs in the dataSet into a dictionary
                 minX = maxX = minY = maxY = 0
+                
+                if self.dataCache == None:
+                    self.dataCache = {}
+
                 if not 'data' in self.dataCache:
                     self.dataCache['data'] = {}
                 for x,y in dataSet:
@@ -724,6 +728,7 @@ class Metric(Node):
             else:
                 return None
         def onFailure(reason):
+            #log.error("KEV: opsview: _fetchOdwData: onFailure: reason = %s"%str(reason))
             return reason
         host, service, metric = hsm.split('::')
         d = txdbinterface.loadOdwData(odwHost, odwDb, odwUser, odwPass, host, service, metric, reqStart, reqEnd)
@@ -742,7 +747,7 @@ class Metric(Node):
         else:
             reqStart, reqEnd = self._calcBeginEnd(end_time, durSet)
         # check to see if the cache contains all the data we need
-        if 'data' not in self.dataCache:
+        if (self.dataCache == None) or ('data' not in self.dataCache):
             # nothing in the cache!
             log.debug('cache is empty')
             cacheResult = None
@@ -791,7 +796,7 @@ class Metric(Node):
     def makeLive(self, uri, api_tool, h_s_m, headers, cookies, timeout):
         if self.live:
             self.live.cancel()
-        if 'data' not in self.dataCache:
+        if (self.dataCache == None) or ('data' not in self.dataCache):
             # we have no cache, grab the last two days of data and turn live on
             now = int(time.time())
             tmp = self.getData(uri, api_tool, h_s_m, now, ('-',2,'d'), headers, cookies, timeout)
