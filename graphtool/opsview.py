@@ -5,7 +5,7 @@ from twisted.web import client as web_client
 from twisted.internet import defer, reactor
 from paste.auth import auth_tkt
 
-import json, time, datetime, urllib
+import json, time, datetime, urllib, exceptions
 import utils, rest_api, txdbinterface
 import re, copy
 
@@ -25,6 +25,11 @@ dataTimeout = 20
 cacheLife = 3600 # dump any cache that hasn't been used in 60 mins
 cacheLatency = 300 # don't fetch new data if newest data in cache is less than 5 mins old
 
+class OdwError(exceptions.Exception):
+    """ Error received while attempting fetch ODW Data """
+    def __repr__(self):
+        return 'OdwError'
+    
 class Node(object):
     def __init__(self, name, type):
         self.name = name
@@ -708,12 +713,13 @@ class Metric(Node):
         d.addCallback(onSuccess, reqStart, reqEnd).addErrback(onFailure, uri, api_tool, headers, cookies, reqStart, reqEnd, timeout, retry)
         return d
     
-    def _fetchOdwData(self, odwHost, odwDb, odwUser, odwPass, hsm, reqStart, reqEnd):
+    def _fetchOdwData(self, odwHost, odwDb, odwUser, odwPass, hsm, reqStart, reqEnd, uri=None, api_tool=None, headers=None, cookies=None, timeout=None, retry=0):
         def onSuccess(result, reqStart, reqEnd, hsm):
             log.debug('got metric odw request back')
             metricResult = result[0]
             unitResult = result[1][0]
             if len(result):
+                log.debug('got result of lenght: %s' % len(result))
                 uom = unitResult
                 label = hsm
                 dataSet = {}
@@ -726,10 +732,22 @@ class Metric(Node):
                 dataSet['list'].append(data)
                 return self._cacheAndReturnData(dataSet, reqStart, reqEnd)
             else:
-                return None
+                log.debug('failed to retreive odw data')
+                if not uri:
+                    log.debug('missing uri, unable to fall back to rest request')
+                    return None
+                else:
+                    log.debug('falling back to rest request')
+                    return self._fetchRestData(uri, api_tool, hsm, headers, cookies, timeout, reqStart, reqEnd, retry)
         def onFailure(reason):
             #log.error("KEV: opsview: _fetchOdwData: onFailure: reason = %s"%str(reason))
-            return reason
+            log.debug('got db error')
+            if not uri:
+                log.debug('missing uri, unable to fall back to rest request')
+                return reason
+            else:
+                log.debug('falling back to rest request')
+                return self._fetchRestData(uri, api_tool, hsm, headers, cookies, timeout, reqStart, reqEnd, retry)
         host, service, metric = hsm.split('::')
         d = txdbinterface.loadOdwData(odwHost, odwDb, odwUser, odwPass, host, service, metric, reqStart, reqEnd)
         d.addCallback(onSuccess, reqStart, reqEnd, hsm).addErrback(onFailure)
@@ -787,7 +805,8 @@ class Metric(Node):
                 hasOdw = False
             if hasOdw:
                 log.debug('fetching data from ODW')
-                return self._fetchOdwData(odwHost, odwDb, odwUser, odwPass, h_s_m, reqStart, reqEnd)
+                d = self._fetchOdwData(odwHost, odwDb, odwUser, odwPass, h_s_m, reqStart, reqEnd, uri, api_tool, headers, cookies, timeout, retry=0)
+                return d
             else:
                 log.debug('fetching data from API')
                 return self._fetchRestData(uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=0)
