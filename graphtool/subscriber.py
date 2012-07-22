@@ -569,8 +569,9 @@ class subscriber(object):
         log.debug('graphing the following series: %s' % chart.getSeries())
         for row in chart.getSeries():
             result = self._fetchMetricData(chart, row, returnData=True)
-            result.addCallback(onSeriesSuccess, row)
-            ds.append(result)
+            if result:
+                result.addCallback(onSeriesSuccess, row)
+                ds.append(result)
         d = defer.DeferredList(ds, consumeErrors=False)
         d.addCallbacks(onTotalSuccess, onFailure)
         return d
@@ -583,7 +584,7 @@ class subscriber(object):
             cred_token, cred_time = self.auth_node_list[data_node]
         except:
             log.error("subscriber: makeGraph: Cannot get cred_token for data_node=%s"%data_node)
-            continue
+            return None
         if int(time.time()) > int(cred_time + reauth_timeout):
             # if we have exceeded our auth time, force a re-authentication.
             d = self.authenticateNode(data_node)

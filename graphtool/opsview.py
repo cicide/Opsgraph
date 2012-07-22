@@ -85,7 +85,7 @@ class Domain(Node):
         self.last_full_event_load = 0
         self.do_dns_lookup(self.host)
         self.event_type_list = []
-        self.eventList = []
+        self.eventList = {}
         self.rescan_sched = 0
         self.odwHost = odwHost
         self.odwDb = odwDb
