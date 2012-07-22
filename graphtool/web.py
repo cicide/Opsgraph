@@ -1302,6 +1302,7 @@ class ExternalElement(athena.LiveElement):
         return modal_close
     
     def saveGraph(self):
+        log.debug('save graph requested.')
         graph_saved = self.subscriber.saveGraph(self.chart)
         if graph_saved:
             return True

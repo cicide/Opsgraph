@@ -395,7 +395,8 @@ class Domain(Node):
     def getApi(self):
         return api_tool
     
-    def fetchData(self, h_s_m, end_time=None, duration=None, creds={}, cookies={}, hsm=None, durSet=(), timeout=dataTimeout, retry=0):
+    def fetchData(self, api_uri, end_time=None, duration=None, creds={}, cookies={}, hsm=None, durSet=(), timeout=dataTimeout, returnData=True, retry=0):
+        log.debug('node data fetch request with timeout of %s' % timeout)
         if not duration:
             duration = graph_duration
         if not end_time:
@@ -411,7 +412,7 @@ class Domain(Node):
                     m_metric = m_service.getChild(metric)
                     if m_metric:
                         # the host, service, metric is valid, request the data
-                        result =  m_metric.getData(self.uri, self.api_tool, h_s_m, end_time, durSet, headers=creds, cookies=cookies, timeout=timeout)
+                        result =  m_metric.getData(self.uri, self.api_tool, api_uri, end_time, durSet, headers=creds, cookies=cookies, timeout=timeout, returnData=returnData, retry=retry)
                         return result
                     else:
                         log.error('no valid metric found')
@@ -724,7 +725,7 @@ class Metric(Node):
         d.addCallback(onSuccess, reqStart, reqEnd).addErrback(onFailure, uri, api_tool, headers, cookies, reqStart, reqEnd, timeout, retry)
         return d
     
-    def _fetchOdwData(self, odwHost, odwDb, odwUser, odwPass, hsm, reqStart, reqEnd, uri=None, api_tool=None, headers=None, cookies=None, timeout=None, retry=0):
+    def _fetchOdwData(self, odwHost, odwDb, odwUser, odwPass, hsm, reqStart, reqEnd, uri=None, api_tool=None, headers=None, cookies=None, timeout=None, retry=0, returnData=True):
         def onSuccess(result, reqStart, reqEnd, hsm):
             log.debug('got metric odw request back')
             metricResult = result[0]
@@ -741,7 +742,7 @@ class Metric(Node):
                 data['label'] = label
                 data['description'] = None
                 dataSet['list'].append(data)
-                return self._cacheAndReturnData(dataSet, reqStart, reqEnd)
+                return self._cacheAndReturnData(dataSet, reqStart, reqEnd, returnData)
             else:
                 log.debug('failed to retreive odw data')
                 if not uri:
@@ -774,8 +775,8 @@ class Metric(Node):
         self.live = self.reactor.callLater(cacheLatency, self._getLiveData, uri, api_tool, h_s_m, int(time.time()), ('-', 1, 'h'), headers, cookies, timeout)
         return self.getData(uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout)
     
-    def getData(self, uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout, retry=0, start=None, end=None):
-        log.debug('get maybe cached data called')
+    def getData(self, uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout, returnData=True, retry=0, start=None, end=None):
+        log.debug('get maybe cached data called with timeout of %s' % timeout)
         if (start and end):
             reqStart = start
             reqEnd = end
@@ -790,6 +791,10 @@ class Metric(Node):
             log.debug('checking cache contents ')
             dataKeys = self.dataCache['data'].keys()
             dataKeys.sort()
+            log.debug('requested start: %s' % reqStart)
+            log.debug('requested end: %s' % reqEnd)
+            log.debug('cache start: %s' % dataKeys[0])
+            log.debug('cache end: %s' % dataKeys[len(dataKeys)-1])
             from bisect import bisect
             inStart = bisect(dataKeys, reqStart+cacheLatency)
             inEnd = bisect(dataKeys, reqEnd-cacheLatency)
@@ -822,11 +827,11 @@ class Metric(Node):
                 hasOdw = False
             if hasOdw:
                 log.debug('fetching data from ODW')
-                d = self._fetchOdwData(odwHost, odwDb, odwUser, odwPass, h_s_m, reqStart, reqEnd, uri, api_tool, headers, cookies, timeout, retry=0)
+                d = self._fetchOdwData(odwHost, odwDb, odwUser, odwPass, h_s_m, reqStart, reqEnd, uri, api_tool, headers, cookies, timeout, retry=retry, returnData=returnData)
                 return d
             else:
                 log.debug('fetching data from API')
-                return self._fetchRestData(uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=0)
+                return self._fetchRestData(uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=retry, returnData=returnData)
             
 
     def makeLive(self, uri, api_tool, h_s_m, headers, cookies, timeout):

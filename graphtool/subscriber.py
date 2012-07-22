@@ -568,35 +568,38 @@ class subscriber(object):
         chart.setDataNodes([])
         log.debug('graphing the following series: %s' % chart.getSeries())
         for row in chart.getSeries():
-            log.debug('trying to grab four items from %s' % chart.getSeriesTracker(row))
-            log.debug('subscribers auth_list is %s' % self.auth_node_list)
-            data_node, host, service, metric = chart.getSeriesTracker(row)
-            try:
-                cred_token, cred_time = self.auth_node_list[data_node]
-            except:
-                log.error("subscriber: makeGraph: Cannot get cred_token for data_node=%s"%data_node)
-                continue
-            if int(time.time()) > int(cred_time + reauth_timeout):
-                # if we have exceeded our auth time, force a re-authentication.
-                d = self.authenticateNode(data_node)
-                log.debug('re-authentication requested')
-                d.addCallback(self._makeGraph,chart).addErrback(self.onFailure)
-                return d
-            if data_node not in chart.getDataNodes():
-                chart.addDataNode(data_node)
-            creds = {'X-Opsview-Username': self.username, 'X-Opsview-Token': self.auth_node_list[data_node][0]}
-            cookies = {'auth_tkt': self.auth_tkt}
-            api_uri = '%s::%s::%s' % (host, service, metric)
-            chart.setSeriesUri(row, data_node, api_uri)
-            end_time,duration = chart.calculateGraphPeriod()
-            #result = opsview.node_list[data_node].fetchData(api_uri, end_time, duration, creds, cookies, (host, service, metric))
-            result = defer.maybeDeferred(opsview.node_list[data_node].fetchData, api_uri, end_time, duration, creds, cookies, (host, service, metric), (chart.getChartDurationModifier(), chart.getChartDurationLength(), chart.getChartDurationUnit()))
+            result = self._fetchMetricData(chart, row, returnData=True)
             result.addCallback(onSeriesSuccess, row)
             ds.append(result)
         d = defer.DeferredList(ds, consumeErrors=False)
         d.addCallbacks(onTotalSuccess, onFailure)
         return d
-        
+
+    def _fetchMetricData(self, chart, row, returnData=True):
+        log.debug('trying to grab four items from %s' % chart.getSeriesTracker(row))
+        log.debug('subscribers auth_list is %s' % self.auth_node_list)
+        data_node, host, service, metric = chart.getSeriesTracker(row)
+        try:
+            cred_token, cred_time = self.auth_node_list[data_node]
+        except:
+            log.error("subscriber: makeGraph: Cannot get cred_token for data_node=%s"%data_node)
+            continue
+        if int(time.time()) > int(cred_time + reauth_timeout):
+            # if we have exceeded our auth time, force a re-authentication.
+            d = self.authenticateNode(data_node)
+            log.debug('re-authentication requested')
+            d.addCallback(self._makeGraph,chart).addErrback(self.onFailure)
+            return d
+        if data_node not in chart.getDataNodes():
+            chart.addDataNode(data_node)
+        creds = {'X-Opsview-Username': self.username, 'X-Opsview-Token': self.auth_node_list[data_node][0]}
+        cookies = {'auth_tkt': self.auth_tkt}
+        api_uri = '%s::%s::%s' % (host, service, metric)
+        chart.setSeriesUri(row, data_node, api_uri)
+        end_time,duration = chart.calculateGraphPeriod()
+        #result = opsview.node_list[data_node].fetchData(api_uri, end_time, duration, creds, cookies, (host, service, metric))
+        result = defer.maybeDeferred(opsview.node_list[data_node].fetchData, api_uri, end_time, duration, creds, cookies, (host, service, metric), (chart.getChartDurationModifier(), chart.getChartDurationLength(), chart.getChartDurationUnit()), returnData=returnData)
+        return result
 
     @_setTouchTime_decorator
     def saveGraph(self, chart):
