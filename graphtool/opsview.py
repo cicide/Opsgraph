@@ -179,6 +179,17 @@ class Domain(Node):
     def onErr(self, reason):
         log.error(reason)
         
+    def onInitErr(self, reason):
+        log.error(reason)
+        if reason.getErrorMessage() == '401 Unauthorized':
+            # Re login to opsview server
+            log.debug("Relogging in into opsview server")
+            self.masterLoginToken = None
+            log.debug('OnInitErr: Scheduling a rescan for in one minute')
+            reactor.callLater(60, self.initialize)
+            self.rescan_sched = int(time.time()) + 60
+            #return False
+
     def setVersions(self, easyxdm, api_min, api):
         self.easyxdm_version = easyxdm
         self.api_min_version = api_min
@@ -254,11 +265,11 @@ class Domain(Node):
         if not self.masterLoginToken:
             log.info('Initializing opsview node %s' % self.name)
             d = self.loginMaster()
-            return d.addCallback(self.initialize).addErrback(self.onErr)
+            return d.addCallback(self.initialize).addErrback(self.onInitErr)
         else:
             self.creds = {'X-Opsview-Username': self.login, 'X-Opsview-Token': self.masterLoginToken}
             d = rest_api.getInfo(self.uri, 'rest/status/service', headers=self.creds, timeout=loginTimeout)
-            return d.addCallbacks(self.addServices,self.onErr)
+            return d.addCallbacks(self.addServices,self.onInitErr)
             
     def getHostByName(self, name):
         return self.children.get(name, None)
@@ -728,7 +739,6 @@ class Metric(Node):
             else:
                 return None
         def onFailure(reason):
-            #log.error("KEV: opsview: _fetchOdwData: onFailure: reason = %s"%str(reason))
             return reason
         host, service, metric = hsm.split('::')
         d = txdbinterface.loadOdwData(odwHost, odwDb, odwUser, odwPass, host, service, metric, reqStart, reqEnd)
