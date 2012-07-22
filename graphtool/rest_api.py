@@ -111,8 +111,8 @@ class dataFetcher(object):
             else:
                 return reason
         else:
-            log.error('Bind Error during uri request: %s - %s' % (uri,reason))
-        raise ApiError
+            log.error('Bind Error during uri request: URI=%s - ErrorMessage=%s - Reason:%s' % (uri,reason.getErrorMessage(), reason))
+        raise ApiError(reason.getErrorMessage())
 
 class ApiError(exceptions.Exception):
     """ Error received while attempting remote Opsview Login """
