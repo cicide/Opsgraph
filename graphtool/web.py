@@ -1019,7 +1019,7 @@ class ExternalElement(athena.LiveElement):
                 def_title = self.subscriber.getGraphTitle(self.chart)
                 self.callRemote('addNamedTextInput', unicode('22SettingsCellContent'), unicode('Graph Title: '), unicode('graph_title'), unicode(def_title), unicode(''))
                 def_start_time = self.subscriber.getGraphStartTime(self.chart)
-                self.callRemote('addNamedTextInput', unicode('23SettingsCellContent'), unicode('Start Time: '), unicode('graph_start_time'), unicode(def_start_time), unicode('datetime'))
+                self.callRemote('addNamedTextInput', unicode('23SettingsCellContent'), unicode('Start Time: '), unicode('graph_start_time'), unicode('Now'), unicode('datetime'))
                 def_duration = self.subscriber.getGraphDuration(self.chart)
                 self.callRemote('addNamedTextInput', unicode('24SettingsCellContent'), unicode('Duration: '), unicode('graph_duration'), unicode(def_duration),unicode(''))
                 if (str(choice) in ('Zoom Chart') and self.subscriber.getGraphEngine(self.chart) == 'FusionCharts') or (self.subscriber.getGraphEngine(self.chart) == 'HighCharts'):
