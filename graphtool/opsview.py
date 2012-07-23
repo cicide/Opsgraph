@@ -5,7 +5,7 @@ from twisted.web import client as web_client
 from twisted.internet import defer, reactor
 from paste.auth import auth_tkt
 
-import json, time, datetime, urllib
+import json, time, datetime, urllib, exceptions
 import utils, rest_api, txdbinterface
 import re, copy
 
@@ -25,6 +25,11 @@ dataTimeout = 20
 cacheLife = 3600 # dump any cache that hasn't been used in 60 mins
 cacheLatency = 300 # don't fetch new data if newest data in cache is less than 5 mins old
 
+class OdwError(exceptions.Exception):
+    """ Error received while attempting fetch ODW Data """
+    def __repr__(self):
+        return 'OdwError'
+    
 class Node(object):
     def __init__(self, name, type):
         self.name = name
@@ -80,7 +85,7 @@ class Domain(Node):
         self.last_full_event_load = 0
         self.do_dns_lookup(self.host)
         self.event_type_list = []
-        self.eventList = []
+        self.eventList = {}
         self.rescan_sched = 0
         self.odwHost = odwHost
         self.odwDb = odwDb
@@ -99,10 +104,14 @@ class Domain(Node):
             log.debug('Got Event Types result for Node %s: ' % self.name)
             log.debug(result)
             self.event_type_list = []
-            for item in result:
-                if item[0] not in event_type_list:
-                    event_type_list.append(item[0])
-                self.event_type_list.append(item[0])
+            if result and type(result) != type(bool()):            
+                for item in result:
+                    if item[0] not in event_type_list:
+                        event_type_list.append(item[0])
+                    self.event_type_list.append(item[0])
+            else:
+                log.debug("onTypeSuccess: Got no event types")
+  
         def onEventsSuccess(result):
             log.debug('Got Event List result for Node %s: ' % self.name)
             log.debug(result)
@@ -175,6 +184,17 @@ class Domain(Node):
     def onErr(self, reason):
         log.error(reason)
         
+    def onInitErr(self, reason):
+        log.error(reason)
+        if reason.getErrorMessage() == '401 Unauthorized':
+            # Re login to opsview server
+            log.debug("Relogging in into opsview server")
+            self.masterLoginToken = None
+            log.debug('OnInitErr: Scheduling a rescan for in one minute')
+            reactor.callLater(60, self.initialize)
+            self.rescan_sched = int(time.time()) + 60
+            #return False
+
     def setVersions(self, easyxdm, api_min, api):
         self.easyxdm_version = easyxdm
         self.api_min_version = api_min
@@ -250,11 +270,11 @@ class Domain(Node):
         if not self.masterLoginToken:
             log.info('Initializing opsview node %s' % self.name)
             d = self.loginMaster()
-            return d.addCallback(self.initialize).addErrback(self.onErr)
+            return d.addCallback(self.initialize).addErrback(self.onInitErr)
         else:
             self.creds = {'X-Opsview-Username': self.login, 'X-Opsview-Token': self.masterLoginToken}
             d = rest_api.getInfo(self.uri, 'rest/status/service', headers=self.creds, timeout=loginTimeout)
-            return d.addCallbacks(self.addServices,self.onErr)
+            return d.addCallbacks(self.addServices,self.onInitErr)
             
     def getHostByName(self, name):
         return self.children.get(name, None)
@@ -386,7 +406,8 @@ class Domain(Node):
     def getApi(self):
         return api_tool
     
-    def fetchData(self, h_s_m, end_time=None, duration=None, creds={}, cookies={}, hsm=None, durSet=(), timeout=dataTimeout, retry=0):
+    def fetchData(self, api_uri, end_time=None, duration=None, creds={}, cookies={}, hsm=None, durSet=(), timeout=dataTimeout, returnData=True, retry=0):
+        log.debug('node data fetch request with timeout of %s' % timeout)
         if not duration:
             duration = graph_duration
         if not end_time:
@@ -402,7 +423,7 @@ class Domain(Node):
                     m_metric = m_service.getChild(metric)
                     if m_metric:
                         # the host, service, metric is valid, request the data
-                        result =  m_metric.getData(self.uri, self.api_tool, h_s_m, end_time, durSet, headers=creds, cookies=cookies, timeout=timeout)
+                        result =  m_metric.getData(self.uri, self.api_tool, api_uri, end_time, durSet, headers=creds, cookies=cookies, timeout=timeout, returnData=returnData, retry=retry)
                         return result
                     else:
                         log.error('no valid metric found')
@@ -559,7 +580,7 @@ class Metric(Node):
         log.debug('cache has expired for metric')
         self.cacheExpire = self.dataCache = None
         
-    def _cacheAndReturnData(self, data, start, end):
+    def _cacheAndReturnData(self, data, start, end, returnData=True):
         """ add fetched data to cache """
         if not data:
             log.debug('No data to add to cache')
@@ -576,6 +597,7 @@ class Metric(Node):
                 log.debug('no data in the result set, not caching')
                 return {}
             else:
+                log.debug('adding data to cache')
                 dataSet = resultSet['data']
                 description = resultSet['description']
                 log.debug('description: %s' % description)
@@ -584,32 +606,47 @@ class Metric(Node):
                 #dataAvg = description['Average']
                 dataUom = resultSet['uom']
                 dataLabel = resultSet['label']
-                #convert x,y pairs in the dataSet into a dictionary
-                minX = maxX = minY = maxY = 0
-                if not 'data' in self.dataCache:
-                    self.dataCache['data'] = {}
-                for x,y in dataSet:
-                    if str(y) == '':
-                        y = None # this is not correct, need to check fusionchart/highcharts how to handle this
-                    if timeRoundBase:
-                        # round all x values to the nearest timeRoundBase (from round_time value in the config file)
-                        x = int(timeRoundBase * round(float(x)/timeRoundBase))
-                    else:
-                        x = int(x)
-                        if x < minX: minX = x
-                        if x > maxX: maxX = x
-                    if y:
-                        y = float(y)
-                        if y < minY: minY = y
-                        if y > maxY: maxY = y
-                    else:
-                        y = '' # this allows fusioncharts and highcharts to recognize this is missing data
-                    self.dataCache['data'][x] = y
-                self.dataCache['label'] = dataLabel
-                self.dataCache['uom'] = dataUom
-                return self._getCachedData(start, end)
+                
+                if self.dataCache == None:
+                    self.dataCache = {}
 
+                if not 'data' in self.dataCache:
+                    self.dataCache['data'] = self._normalizeData(dataSet, timeRoundBase)
+                    self.dataCache['label'] = dataLabel
+                    self.dataCache['uom'] = dataUom
+                else:
+                    newData = self._normalizeData(dataSet, timeRoundBase)
+                    self.dataCache['data'].update(newData)
+                if returnData:
+                    return self._getCachedData(start, end)
+                else:
+                    return False
+
+    def _normalizeData(self, dataSet, roundBase):
+        #convert x,y pairs in the dataSet into a dictionary
+        minX = maxX = minY = maxY = 0        
+        normalizedData = {}
+        for x,y in dataSet:
+            if str(y) == '':
+                y = None # this is not correct, need to check fusionchart/highcharts how to handle this
+            if timeRoundBase:
+                # round all x values to the nearest timeRoundBase (from round_time value in the config file)
+                x = int(timeRoundBase * round(float(x)/timeRoundBase))
+            else:
+                x = int(x)
+                if x < minX: minX = x
+                if x > maxX: maxX = x
+            if y:
+                y = float(y)
+                if y < minY: minY = y
+                if y > maxY: maxY = y
+            else:
+                y = '' # this allows fusioncharts and highcharts to recognize this is missing data
+            normalizedData[x] = y
+        return normalizedData
+    
     def _getCachedData(self, start, end):
+        log.debug('returning cached data')
         if not self.dataCache:
             return {}
         data = self.dataCache['data']
@@ -635,6 +672,7 @@ class Metric(Node):
         returnSet['cacheData'] = dataSet
         returnSet['label'] = self.dataCache['label']
         returnSet['uom'] = self.dataCache['uom']
+        log.debug('returning cached data with %s records' % len(dataSet))
         return {'list': [returnSet]}
 
     def _calcBeginEnd(self, end_time, durSet):
@@ -664,14 +702,12 @@ class Metric(Node):
 
 
             
-    def _fetchRestData(self, uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=0):
+    def _fetchRestData(self, uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=0, returnData=True):
         def onSuccess(result, reqStart, reqEnd):
             #we got back a result from our data fetch request - add it to our cache and set our timestamp
             #return the result to the calling function
             log.debug('got metric api request back')
-            data = self._cacheAndReturnData(result, reqStart, reqEnd)
-            #log.debug('returning result: %s' % result)
-            return data
+            return self._cacheAndReturnData(result, reqStart, reqEnd, returnData)
         def onFailure(result, uri=None, api_tool=None, headers=None, cookies=None, reqStart=None, reqEnd=None, timeout=dataTimeout, retry=0):
             #trap possible errors here
             l = result.trap(rest_api.ApiError, defer.CancelledError)
@@ -700,12 +736,13 @@ class Metric(Node):
         d.addCallback(onSuccess, reqStart, reqEnd).addErrback(onFailure, uri, api_tool, headers, cookies, reqStart, reqEnd, timeout, retry)
         return d
     
-    def _fetchOdwData(self, odwHost, odwDb, odwUser, odwPass, hsm, reqStart, reqEnd):
+    def _fetchOdwData(self, odwHost, odwDb, odwUser, odwPass, hsm, reqStart, reqEnd, uri=None, api_tool=None, headers=None, cookies=None, timeout=None, retry=0, returnData=True):
         def onSuccess(result, reqStart, reqEnd, hsm):
             log.debug('got metric odw request back')
             metricResult = result[0]
             unitResult = result[1][0]
             if len(result):
+                log.debug('got result of lenght: %s' % len(result))
                 uom = unitResult
                 label = hsm
                 dataSet = {}
@@ -716,12 +753,30 @@ class Metric(Node):
                 data['label'] = label
                 data['description'] = None
                 dataSet['list'].append(data)
-                return self._cacheAndReturnData(dataSet, reqStart, reqEnd)
+                return self._cacheAndReturnData(dataSet, reqStart, reqEnd, returnData)
             else:
-                return None
+                log.debug('failed to retreive odw data')
+                if not uri:
+                    log.debug('missing uri, unable to fall back to rest request')
+                    return None
+                else:
+                    log.debug('falling back to rest request')
+                    return self._fetchRestData(uri, api_tool, hsm, headers, cookies, timeout, reqStart, reqEnd, retry)
         def onFailure(reason):
-            return reason
+            log.debug('got db error')
+            if not uri:
+                log.debug('missing uri, unable to fall back to rest request')
+                return reason
+            else:
+                log.debug('falling back to rest request')
+                return self._fetchRestData(uri, api_tool, hsm, headers, cookies, timeout, reqStart, reqEnd, retry)
         host, service, metric = hsm.split('::')
+        if int(time.time() - reqEnd) < 1000:
+            if uri:
+                tmpReqStart = int(time.time() - 1200)
+                tmpReqEnd = int(time.time())
+                log.debug('getting lastest 15 minutes of data via rest api')
+                tmp = self._fetchRestData(uri, api_tool, hsm, headers, cookies, timeout, tmpReqStart, tmpReqEnd, retry, False)
         d = txdbinterface.loadOdwData(odwHost, odwDb, odwUser, odwPass, host, service, metric, reqStart, reqEnd)
         d.addCallback(onSuccess, reqStart, reqEnd, hsm).addErrback(onFailure)
         return d
@@ -730,15 +785,15 @@ class Metric(Node):
         self.live = self.reactor.callLater(cacheLatency, self._getLiveData, uri, api_tool, h_s_m, int(time.time()), ('-', 1, 'h'), headers, cookies, timeout)
         return self.getData(uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout)
     
-    def getData(self, uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout, retry=0, start=None, end=None):
-        log.debug('get maybe cached data called')
+    def getData(self, uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout, returnData=True, retry=0, start=None, end=None):
+        log.debug('get maybe cached data called with timeout of %s' % timeout)
         if (start and end):
             reqStart = start
             reqEnd = end
         else:
             reqStart, reqEnd = self._calcBeginEnd(end_time, durSet)
         # check to see if the cache contains all the data we need
-        if 'data' not in self.dataCache:
+        if (self.dataCache == None) or ('data' not in self.dataCache):
             # nothing in the cache!
             log.debug('cache is empty')
             cacheResult = None
@@ -746,6 +801,10 @@ class Metric(Node):
             log.debug('checking cache contents ')
             dataKeys = self.dataCache['data'].keys()
             dataKeys.sort()
+            log.debug('requested start: %s' % reqStart)
+            log.debug('requested end: %s' % reqEnd)
+            log.debug('cache start: %s' % dataKeys[0])
+            log.debug('cache end: %s' % dataKeys[len(dataKeys)-1])
             from bisect import bisect
             inStart = bisect(dataKeys, reqStart+cacheLatency)
             inEnd = bisect(dataKeys, reqEnd-cacheLatency)
@@ -778,16 +837,17 @@ class Metric(Node):
                 hasOdw = False
             if hasOdw:
                 log.debug('fetching data from ODW')
-                return self._fetchOdwData(odwHost, odwDb, odwUser, odwPass, h_s_m, reqStart, reqEnd)
+                d = self._fetchOdwData(odwHost, odwDb, odwUser, odwPass, h_s_m, reqStart, reqEnd, uri, api_tool, headers, cookies, timeout, retry=retry, returnData=returnData)
+                return d
             else:
                 log.debug('fetching data from API')
-                return self._fetchRestData(uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=0)
+                return self._fetchRestData(uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=retry, returnData=returnData)
             
 
     def makeLive(self, uri, api_tool, h_s_m, headers, cookies, timeout):
         if self.live:
             self.live.cancel()
-        if 'data' not in self.dataCache:
+        if (self.dataCache == None) or ('data' not in self.dataCache):
             # we have no cache, grab the last two days of data and turn live on
             now = int(time.time())
             tmp = self.getData(uri, api_tool, h_s_m, now, ('-',2,'d'), headers, cookies, timeout)
@@ -833,8 +893,7 @@ def search(domainlist, dpattern=None, hpattern=None, spattern=None, mpattern=Non
     if not mpattern:
         mpattern= "" 
     dpat = re.compile(dpattern, re.I)
-
-    for key in node_list:
+    for key in domainlist:
         hList = {}
         if dpat.search(key):
             hList = node_list[key].searchChildren(hpattern)

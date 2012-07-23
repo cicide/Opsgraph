@@ -87,11 +87,7 @@ ViewSuites.ViewSuiteWidget.methods(
         cal_image.setAttribute('border', '0');
         cal_image.setAttribute('alt', 'Pick a date');
         theWholeField.appendChild(datetime_link);
-        $jq(theWholeField).find("#"+theTextIdField).datetimepicker(
-                                                            {maxDate: new Date(),
-                                                             stepMinute: 5,
-                                                             showButtonPanel: true,
-                                                             });
+        $jq(theWholeField).find("#"+theTextIdField).datetimepicker( { });
     }
     theFieldCell.appendChild(theWholeField);
     return false;

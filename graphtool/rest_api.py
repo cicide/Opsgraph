@@ -3,7 +3,7 @@
 from twisted.web import client, error as weberror
 from twisted.internet import defer, reactor, error as interror
 from twisted.application import internet
-import urllib, json
+import urllib, json, exceptions
 import utils
 
 log = utils.get_logger("RAPIService")
@@ -111,10 +111,10 @@ class dataFetcher(object):
             else:
                 return reason
         else:
-            log.error('Bind Error during uri request: %s - %s' % (uri,reason))
-        raise ApiError
+            log.error('Bind Error during uri request: URI=%s - ErrorMessage=%s - Reason:%s' % (uri,reason.getErrorMessage(), reason))
+        raise ApiError(reason.getErrorMessage())
 
-class ApiError(Exception):
+class ApiError(exceptions.Exception):
     """ Error received while attempting remote Opsview Login """
     def __repr__(self):
         return 'ApiError'
