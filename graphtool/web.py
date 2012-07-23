@@ -1019,7 +1019,7 @@ class ExternalElement(athena.LiveElement):
                 def_title = self.subscriber.getGraphTitle(self.chart)
                 self.callRemote('addNamedTextInput', unicode('22SettingsCellContent'), unicode('Graph Title: '), unicode('graph_title'), unicode(def_title), unicode(''))
                 def_start_time = self.subscriber.getGraphStartTime(self.chart)
-                self.callRemote('addNamedTextInput', unicode('23SettingsCellContent'), unicode('Start Time: '), unicode('graph_start_time'), unicode(def_start_time), unicode('datetime'))
+                self.callRemote('addNamedTextInput', unicode('23SettingsCellContent'), unicode('Start Time: '), unicode('graph_start_time'), unicode('Now'), unicode('datetime'))
                 def_duration = self.subscriber.getGraphDuration(self.chart)
                 self.callRemote('addNamedTextInput', unicode('24SettingsCellContent'), unicode('Duration: '), unicode('graph_duration'), unicode(def_duration),unicode(''))
                 if (str(choice) in ('Zoom Chart') and self.subscriber.getGraphEngine(self.chart) == 'FusionCharts') or (self.subscriber.getGraphEngine(self.chart) == 'HighCharts'):
@@ -1150,7 +1150,8 @@ class ExternalElement(athena.LiveElement):
                     if prev_node in nodes:
                         tmp = nodes.remove(prev_node)
                 else:
-                    def_option = [unicode('Select a Node'), unicode('select_an_option')]
+                    if nodes and len(nodes) > 1:
+                        def_option = [unicode('Select a Node'), unicode('select_an_option')]
                 for node in nodes:
                     log.debug('adding node %s to node select' % node)
                     node_list.append(unicode(node))
@@ -1301,6 +1302,7 @@ class ExternalElement(athena.LiveElement):
         return modal_close
     
     def saveGraph(self):
+        log.debug('save graph requested.')
         graph_saved = self.subscriber.saveGraph(self.chart)
         if graph_saved:
             return True
@@ -1327,7 +1329,7 @@ class ExternalElement(athena.LiveElement):
         return unicode(self.subscriber.getRegexpMatchCount(self.chart)[0])
     
     def _getRegexMatches(self, item, patt):
-        log.debug('Setting regexp %s to %s' % (item, patt))
+        log.debug('Getting list of choices for regexp %s to %s' % (item, patt))
         tmp = self.subscriber.setRegexp(self.chart, item, patt)
         cellId = self.regexpCellId[str(item)]
         if not tmp:
@@ -1346,9 +1348,12 @@ class ExternalElement(athena.LiveElement):
         log.debug(returnResult)
         return unicode(json.dumps(returnResult))
     
+    def checkRegexpSelect(self):
+        dhsmCount, dhsm = self.subscriber.getRegexpMatchCount(self.chart)
+        return dhsmCount
+        
     def _addRegexpSelect(self):
         dhsmIndexedList = self.subscriber.addRegexpSelect(self.chart)
-        log.debug(dhsmIndexedList)
         self.getOptions('node_options')
         return dhsmIndexedList
     
@@ -1358,7 +1363,8 @@ class ExternalElement(athena.LiveElement):
         def_option = []
         node_list  = []
         nodes      = self.subscriber.getAuthNodes()
-        def_option = [unicode('Select a Node'), unicode('select_an_option')]
+        if nodes and len(nodes) > 1:
+            def_option = [unicode('Select a Node'), unicode('select_an_option')]
         for node in nodes:
             node_list.append(unicode(node))
         selectId   = unicode('node')
@@ -1392,6 +1398,7 @@ class ExternalElement(athena.LiveElement):
     initRegexp = expose(_initRegexp)
     setRegexp = expose(_setRegexp)
     addRegexpSelect = expose(_addRegexpSelect)
+    checkRegexpSelect = expose(checkRegexpSelect)
     getRegexMatches = expose(_getRegexMatches)
     resetGraphValues = expose(resetGraphValues)
     resetNodeSelection = expose(resetNodeSelection)
@@ -1481,9 +1488,9 @@ site = wrapAuthorized(RootPage(),LoginForm())
 
 def getService():
     services = []
-    service.setName("WEBService")
     if httpport:
         service = internet.TCPServer(httpport, site)
+        service.setName("WEBService")
         services.append(service)
     if sslport:
         sslContext = ssl.DefaultOpenSSLContextFactory(sslPrivKey,sslCaCert,)

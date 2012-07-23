@@ -12,6 +12,7 @@ def_dur_len = utils.config.get('graph', 'duration_length')
 def_dur_unit = utils.config.get('graph', 'duration_unit')
 
 suites = {}
+loadOnSelect = True
 
 class suite(object):
     
@@ -547,6 +548,10 @@ class chart(object):
         return self.metricSeries
     
     def getCurrentSeries(self):
+        def onSuccess(result):
+            log.debug('completed pre-load')
+        def onFail(reason):
+            log.debug('preload failed: %s' % reason)
         graphSeries = [self.selected_node, self.selected_host, self.selected_service, self.selected_metric]
         self.previousSeries = graphSeries
         self.seriesCounter += 1
@@ -559,9 +564,16 @@ class chart(object):
             self.metricSeries.append(self.seriesTracker[sel_series][:])
         res_graphSeries = graphSeries[:]
         res_graphSeries.append(series_index)
+        if loadOnSelect:
+            d = self.owner._fetchMetricData(self, series_index, returnData=False)
+            d.addCallback(onSuccess).addErrback(onFail)
         return res_graphSeries
     
     def addUniqueSeries(self, dhsm):
+        def onSuccess(result):
+            log.debug('completed pre-load')
+        def onFail(reason):
+            log.debug('preload failed: %s' % reason)
         self.seriesCounter += 1
         series_index = str(self.seriesCounter)
         self.series.append(series_index)
@@ -573,6 +585,9 @@ class chart(object):
         for item in dhsm[:]:
             res_dhsm.append(unicode(item))
         res_dhsm.append(unicode(series_index))
+        if loadOnSelect:
+            d = self.owner._fetchMetricData(self, series_index, returnData=False)
+            d.addCallback(onSuccess).addErrback(onFail)            
         return res_dhsm
         
     def cancelSeriesId(self, seriesId):
@@ -777,13 +792,18 @@ class chart(object):
             x_axis_name = "Time"
             graph_settings = self.owner.getGraphSettings(self)
             chart_object = highcharts.getLineChartObject(date_format, graph_settings, data_series, caption, x_axis_name, events, chart_cell)
+            self.chartObject[unicode('chart_engine')] = unicode('HighCharts')
+            self.chartObject[unicode('chart_object')] = chart_object
             return chart_object
 
     def saveGraph(self):
+        log.debug('saving chart')
         # in the future we should detect whether or not this graph has been saved already
         if not self.chartObject:
+            log.debug('no chartObject')
             return False
-        elif str(self.chartObject['chart_engine']) == 'FusionCharts':
+        #elif str(self.chartObject['chart_engine']) == 'FusionCharts':
+        elif str(self.chartObject['chart_engine'] in ('FusionCharts', 'HighCharts')):
             # build a list of series in the graph
             chart_series = []
             for row in self.series:
@@ -819,9 +839,6 @@ class chart(object):
                 chartId = txdbinterface.saveGraph(chart_def, chart_obj, chart_series)
                 self.dbId = chartId
                 return True
-        elif str(self.chartObject['chart_engine']) == 'Highcharts':
-            # um, we don't have save code for highcharts?  wtf?
-            return False
         else:
             return False
     
