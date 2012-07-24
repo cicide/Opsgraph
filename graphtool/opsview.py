@@ -191,8 +191,8 @@ class Domain(Node):
             log.debug("Relogging in into opsview server")
             self.masterLoginToken = None
             log.debug('OnInitErr: Scheduling a rescan for in one minute')
-            reactor.callLater(60, self.initialize)
-            self.rescan_sched = int(time.time()) + 60
+            reactor.callLater(10, self.initialize)
+            self.rescan_sched = int(time.time()) + 10
             #return False
 
     def setVersions(self, easyxdm, api_min, api):
