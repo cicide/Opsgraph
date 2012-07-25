@@ -24,8 +24,8 @@ def_dur_unit = utils.config.get('graph', 'duration_unit')
 # if the subscriber doesn't do anything for x seconds, log them out
 login_timeout = 600
 
-# re-authenticate to opsview once an hour
-reauth_timeout = 120
+# re-authenticate to opsview every 45 minutes
+reauth_timeout = 2700
 
 event_display = 'inclusive'
 event_display_options = ['None', 'All', 'Events', 'Outages']
@@ -72,6 +72,7 @@ class subscriber(object):
         self.dbId = None
         self.chartList = []
         self.livePageList = []
+        self.liveCharts = {}
         self._touchTime = int(time.time())
         self.timeoutChecker = LoopingCall(self._checkTimeout)
         self.timeoutChecker.start(5)
@@ -125,13 +126,36 @@ class subscriber(object):
     def registerAvatarLogout(self, webSession):
         self.webSession = webSession
         
-    def registerLiveElement(self, liveElement):
+    def registerLiveElement(self, liveElement, chart=None):
         if liveElement not in self.livePageList:
+            # Register a new Live Element 
             self.livePageList.append(liveElement)
+            self.liveCharts[liveElement] = []
+            if chart:
+                # Register a new live chart for updating with new data
+                if chart not in self.liveCharts:
+                    self.liveCharts[liveElement].append(chart)
+                else:
+                    log.debug('liveUpdate requested for an element already in my update list')
+                # Let the chart object know it's live - it will be responsible for getting fresh data
+                # and sending it to the live element
+                chart.addLiveElement(liveElement)
+        elif chart:
+            # Let the chart object know it's live
+            self.liveCharts[liveElement].append(chart)
+            chart.addLiveElement(liveElement)
+                
     
     def unregisterLiveElement(self, liveElement):
+        # if this live element was registered, we remove it now
         if liveElement in self.livePageList:
             tmp = self.livePageList.remove(liveElement)
+            if liveElement in self.liveCharts:
+                # if the live element had any live charts, clear them as well
+                for chart in self.liveCharts[liveElement]:
+                    # let the chart object know that it's no longer live for this element
+                    chart.cancelLiveElement(liveElement)
+                tmp = self.liveCharts.pop(liveElement, None)
         
     def isAuthed(self):
         return self.authed
@@ -585,7 +609,7 @@ class subscriber(object):
         except:
             log.error("subscriber: makeGraph: Cannot get cred_token for data_node=%s"%data_node)
             return None
-        if int(time.time()) > int(cred_time + reauth_timeout):
+        if time.time() > (cred_time + reauth_timeout):
             # if we have exceeded our auth time, force a re-authentication.
             d = self.authenticateNode(data_node)
             log.debug('re-authentication requested')

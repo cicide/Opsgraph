@@ -325,6 +325,7 @@ class chart(object):
             self.selected_service = copy_master.selected_service
             self.selected_metric = copy_master.selected_metric
             self.previousSeries = copy_master.previousSeries
+            self.liveElements = copy_master.liveElements
         else:
             self.name = 'Default Graph Name'
             self.title = 'Default.Graph Title'
@@ -365,6 +366,33 @@ class chart(object):
             self.selected_service = None
             self.selected_metric = None
             self.previousSeries = None
+            self.liveElements = []
+        
+    def addLiveElement(self, element):
+        if element not in self.liveElements:
+            log.debug('adding a live element to my list to be updated')
+            self.liveElements.append(element)
+        if self.start == 'Now':
+            log.debug('enable live updates for chart')
+            self.liveUpdate(True, 60)
+        elif (time.time() - self.start) < 301:
+            log.debug('enable live updates for chart with start time within five minutes')
+            self.liveUpdate(True, 60)
+        else:
+            log.debug('graph end time is too old to be made live')
+            
+    def cancelLiveElement(self, element):
+        if element in self.liveElements:
+            log.debug('removing live element from chart')
+            tmp = self.liveElements.remove(element)
+        else:
+            log.debug('got a live element removal request for an element that was not live')
+        if not len(self.liveElements):
+            self.liveUpdate(False)
+            
+    def liveUpdate(self, active, interval=300):
+        # enable or disable liveUpdates
+        log.debug('liveUpdate request: %s, interval: %s' % (active, interval))
         
     def getDataNodes(self):
         return self.dataNodes

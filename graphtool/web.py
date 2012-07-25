@@ -442,6 +442,8 @@ class ViewGraphsElement(athena.LiveElement):
                 self.callRemote('addFusionChart', unicode(graph_type), unicode(defChart), unicode('100%'), unicode('100%'), graph_object, unicode(chart_cell))
             elif chart.getChartEngine() == 'HighCharts':
                 self.callRemote('addHighChart', graph_object)
+            # register this chart as live
+            self.subscriber.registerLiveElement(self, chart)
             #self.subscriber.returnToLastChart()
         def onFailure(reason):
             log.error(reason)
@@ -594,6 +596,8 @@ class ViewSuitesElement(athena.LiveElement):
                 self.callRemote('addFusionChart', unicode(chart_cell), unicode(graph_type), unicode(chart_uid), unicode('100%'), unicode('100%'), graph_object)
             elif chart.getChartEngine() == 'HighCharts':
                 self.callRemote('addHighChart', graph_object, unicode(dbId))
+            # register this graph as live for active updates
+            self.subscriber.registerLiveElement(self, chart)
             return True
         def onFailure(reason):
             log.error(reason)
@@ -1275,6 +1279,8 @@ class ExternalElement(athena.LiveElement):
             elif self.chart.getChartEngine() == 'HighCharts':
                 log.debug('sending object as highchart')
                 self.callRemote('addHighChart', graph_object)
+            # register this chart as live
+            self.subscriber.registerLiveElement(self, self.chart)
             return True
         def onFailure(reason):
             log.error(reason)
