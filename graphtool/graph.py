@@ -384,10 +384,10 @@ class chart(object):
                 log.debug('chartId %s is already being live updated for this element' % chartId)
         if self.start == 'Now':
             log.debug('enable live updates for chart')
-            self.liveUpdate(True, 60)
+            self.liveUpdate(True, 180)
         elif (time.time() - self.start) < 301:
             log.debug('enable live updates for chart with start time within five minutes')
-            self.liveUpdate(True, 60)
+            self.liveUpdate(True, 180)
         else:
             log.debug('graph end time is too old to be made live')
             
@@ -409,15 +409,17 @@ class chart(object):
             self.liveUpdater.start(interval)
         else:
             if self.liveUpdater:
-                log.debug('Stopping live updates')
-                self.liveUpdater.stop()
+                if self.liveUpdater.running:
+                    log.debug('Stopping live updates')
+                    self.liveUpdater.stop()
+                    self.liveUpdater = None
         
     def runLiveUpdates(self):
         self.owner._touchTime = int(time.time())
         log.debug('running Live update for %s' % self.name)
         # Check for new data
         for row in self.getSeries():
-            result = self.owner._fetchMetricData(self, row, returnData=True, end_time=int(time.time()), duration='1h', skipODW=True)
+            result = self.owner._fetchMetricData(self, row, returnData=True, end_time=int(time.time()), extendCache=True, skipODW=True)
         
     def updateLiveElements(self, liveData, seriesId):
         if len(self.liveElements):

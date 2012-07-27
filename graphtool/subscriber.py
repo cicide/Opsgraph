@@ -602,7 +602,7 @@ class subscriber(object):
         d.addCallbacks(onTotalSuccess, onFailure)
         return d
 
-    def _fetchMetricData(self, chart, row, returnData=True, end_time=None, duration=None, skipODW=False):
+    def _fetchMetricData(self, chart, row, returnData=True, end_time=None, extendCache=False, skipODW=False):
         log.debug('trying to grab four items from %s' % chart.getSeriesTracker(row))
         log.debug('subscribers auth_list is %s' % self.auth_node_list)
         data_node, host, service, metric = chart.getSeriesTracker(row)
@@ -623,10 +623,24 @@ class subscriber(object):
         cookies = {'auth_tkt': self.auth_tkt}
         api_uri = '%s::%s::%s' % (host, service, metric)
         chart.setSeriesUri(row, data_node, api_uri)
-        if not end_time:
+        if not extendCache:
+            log.debug('calculating end time')
             end_time,duration = chart.calculateGraphPeriod()
+            durSet = (chart.getChartDurationModifier(), chart.getChartDurationLength(), chart.getChartDurationUnit())
+            endTime = startTime = None
+        elif end_time:
+            startTime = opsview.node_list[data_node].getMaxCacheTimeValue(host, service, metric) + 1
+            endTime = end_time
+            durSet = None
+            log.debug('end time provided by calling party')
+        else:
+            startTime = opsview.node_list[data_node].getMaxCacheTimeValue(host, service, metric) + 1
+            end_time = endTime = int(time.time())
+            durSet = None
+            log.debug('end set to now, no need to calculate')
+        log.debug('end time: %s' % end_time )
         #result = opsview.node_list[data_node].fetchData(api_uri, end_time, duration, creds, cookies, (host, service, metric))
-        result = defer.maybeDeferred(opsview.node_list[data_node].fetchData, api_uri, end_time, duration, creds, cookies, (host, service, metric), (chart.getChartDurationModifier(), chart.getChartDurationLength(), chart.getChartDurationUnit()), returnData=returnData, skipODW=skipODW)
+        result = defer.maybeDeferred(opsview.node_list[data_node].fetchData, api_uri, end_time, creds=creds, cookies=cookies, hsm=(host, service, metric), durSet=durSet, endTime=endTime, startTime=startTime, returnData=returnData, skipODW=skipODW)
         return result
 
     @_setTouchTime_decorator

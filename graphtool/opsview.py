@@ -406,10 +406,25 @@ class Domain(Node):
     def getApi(self):
         return api_tool
     
-    def fetchData(self, api_uri, end_time=None, duration=None, creds={}, cookies={}, hsm=None, durSet=(), timeout=dataTimeout, returnData=True, skipODW=False, retry=0):
+    def getMaxCacheTimeValue(self, host, service, metric):
+        m_host = self.getChild(host)
+        if m_host:
+            m_service = m_host.getChild(service)
+            if m_service:
+                m_metric = m_service.getChild(metric)
+                if m_metric:
+                    result = m_metric.getMaxCacheTimeValue()
+                    log.debug('got max cache value of %s' % result)
+                    return result
+                else:
+                    return None
+            else:
+                return None
+        else:
+            return None
+        
+    def fetchData(self, api_uri, end_time, creds={}, cookies={}, hsm=None, durSet=(), timeout=dataTimeout, endTime=None, startTime=None, returnData=True, skipODW=False, retry=0):
         log.debug('node data fetch request with timeout of %s' % timeout)
-        if not duration:
-            duration = graph_duration
         if not end_time:
             end_time = int(time.time())
         if len(creds) == 0:
@@ -423,7 +438,9 @@ class Domain(Node):
                     m_metric = m_service.getChild(metric)
                     if m_metric:
                         # the host, service, metric is valid, request the data
-                        result =  m_metric.getData(self.uri, self.api_tool, api_uri, end_time, durSet, headers=creds, cookies=cookies, timeout=timeout, returnData=returnData, skipODW=skipODW, retry=retry)
+                        log.debug('start Time: %s' % startTime)
+                        log.debug('end Time: %s' % endTime)
+                        result =  m_metric.getData(self.uri, self.api_tool, api_uri, end_time, durSet, headers=creds, cookies=cookies, timeout=timeout, end=endTime, start=startTime, returnData=returnData, skipODW=skipODW, retry=retry)
                         return result
                     else:
                         log.error('no valid metric found')
@@ -568,6 +585,15 @@ class Metric(Node):
         self.cacheLastHit = 0
         self.cacheExpire = None
         self.live = None
+        
+    def getMaxCacheTimeValue(self):
+        if len(self.dataCache):
+            if 'data' in self.dataCache:
+                return max(self.dataCache['data'].keys())
+            else:
+                return 0
+        else:
+            return 0
         
     def _ackCacheHit(self):
         """ called whenever we need to mark the cache as freshened """
@@ -801,6 +827,7 @@ class Metric(Node):
             log.debug('checking cache contents ')
             dataKeys = self.dataCache['data'].keys()
             dataKeys.sort()
+            log.debug('Now is %s' % int(time.time()))
             log.debug('requested start: %s' % reqStart)
             log.debug('requested end: %s' % reqEnd)
             log.debug('cache start: %s' % dataKeys[0])
