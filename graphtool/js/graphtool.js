@@ -414,11 +414,12 @@ Extern.ExternWidget.methods(
             minLength: 1,
             source: function (request, response) {
                 var nodeTerm = request.term;
-                if ( nodeTerm in nodeRegexCache ) {
-                    response( nodeRegexCache[ nodeTerm ][1] );
-                    self.updateRegexpButton( nodeRegexCache[ nodeTerm ][0] );
-                    return;
-                }
+                //IOPSGRAPH-65
+                //if ( nodeTerm in nodeRegexCache ) {
+                //    response( nodeRegexCache[ nodeTerm ][1] );
+                //    self.updateRegexpButton( nodeRegexCache[ nodeTerm ][0] );
+                //    return;
+                //}
                 lastDat = self.callRemote('getRegexMatches', 'd', nodeTerm).addCallback(
                     function(result) {
                         var obj = jQuery.parseJSON(result)
@@ -442,11 +443,12 @@ Extern.ExternWidget.methods(
             minLength: 1,
             source: function (request, response) {
                 var hostTerm = request.term;
-                if ( hostTerm in hostRegexCache ) {
-                    response( hostRegexCache[ hostTerm ][1] );
-                    self.updateRegexpButton( hostRegexCache[ hostTerm ][0] );
-                    return;
-                }
+                //IOPSGRAPH-65
+                //if ( hostTerm in hostRegexCache ) {
+                //    response( hostRegexCache[ hostTerm ][1] );
+                //     self.updateRegexpButton( hostRegexCache[ hostTerm ][0] );
+                //     return;
+                // }
                 lastDat = self.callRemote('getRegexMatches', 'h', hostTerm).addCallback(
                     function(result) {
                         var obj = jQuery.parseJSON(result)
@@ -470,11 +472,12 @@ Extern.ExternWidget.methods(
             minLength: 1,
             source: function (request, response) {
                 var serviceTerm = request.term;
-                if ( serviceTerm in serviceRegexCache ) {
-                    response( serviceRegexCache[ serviceTerm ][1] );
-                    self.updateRegexpButton( serviceRegexCache[ serviceTerm ][0] );
-                    return;
-                }
+                //IOPSGRAPH-65
+                //if ( serviceTerm in serviceRegexCache ) {
+                //    response( serviceRegexCache[ serviceTerm ][1] );
+                //    self.updateRegexpButton( serviceRegexCache[ serviceTerm ][0] );
+                //    return;
+                //}
                 lastDat = self.callRemote('getRegexMatches', 's', serviceTerm).addCallback(
                     function(result) {
                         var obj = jQuery.parseJSON(result)
@@ -498,11 +501,12 @@ Extern.ExternWidget.methods(
             minLength: 1,
             source: function (request, response) {
                 var metricTerm = request.term;
-                if ( metricTerm in metricRegexCache ) {
-                    response( metricRegexCache[ metricTerm ][1] );
-                    self.updateRegexpButton( metricRegexCache[ metricTerm ][0] );
-                    return;
-                }
+                //IOPSGRAPH-65
+                //if ( metricTerm in metricRegexCache ) {
+                //    response( metricRegexCache[ metricTerm ][1] );
+                //    self.updateRegexpButton( metricRegexCache[ metricTerm ][0] );
+                //    return;
+                //}
                 lastDat = self.callRemote('getRegexMatches', 'm', metricTerm).addCallback(
                     function(result) {
                         var obj = jQuery.parseJSON(result)
