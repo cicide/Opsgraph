@@ -4,6 +4,8 @@ import time, datetime
 import utils, fusioncharts, highcharts, txdbinterface
 from itertools import chain
 from twisted.internet import defer
+from twisted.internet.task import LoopingCall
+
 
 log = utils.get_logger("GraphService")
 
@@ -326,12 +328,13 @@ class chart(object):
             self.selected_metric = copy_master.selected_metric
             self.previousSeries = copy_master.previousSeries
             self.liveElements = copy_master.liveElements
+            self.liveUpdater = copy_master.liveUpdater
         else:
             self.name = 'Default Graph Name'
-            self.title = 'Default.Graph Title'
+            self.title = 'Default Graph Title'
             self.privacy = 'Public' # Public, ACL, Private
-            self.engine = 'FusionCharts'
-            self.ctype = 'Zoom Chart'
+            self.engine = 'HighCharts'
+            self.ctype = 'Line'
             self.dbId = None
             self.size = 'Large'
             self.width = '800'
@@ -366,12 +369,19 @@ class chart(object):
             self.selected_service = None
             self.selected_metric = None
             self.previousSeries = None
-            self.liveElements = []
+            self.liveElements = {}
+            self.liveUpdater = None
         
-    def addLiveElement(self, element):
+    def addLiveElement(self, element, chartId):
         if element not in self.liveElements:
             log.debug('adding a live element to my list to be updated')
-            self.liveElements.append(element)
+            self.liveElements[element] = [chartId]
+        else:
+            if chartId not in self.liveElements[element]:
+                log.debug('adding chartId %s to live element with %i chart ids' % (chartId, len(self.liveElements[element])))
+                self.liveElements[element].append(chartId)
+            else:
+                log.debug('chartId %s is already being live updated for this element' % chartId)
         if self.start == 'Now':
             log.debug('enable live updates for chart')
             self.liveUpdate(True, 60)
@@ -384,15 +394,42 @@ class chart(object):
     def cancelLiveElement(self, element):
         if element in self.liveElements:
             log.debug('removing live element from chart')
-            tmp = self.liveElements.remove(element)
+            tmp = self.liveElements.pop(element)
+            tmp = None
         else:
             log.debug('got a live element removal request for an element that was not live')
         if not len(self.liveElements):
             self.liveUpdate(False)
             
     def liveUpdate(self, active, interval=300):
-        # enable or disable liveUpdates
+        # enable or disable liveUpdates - looping call
         log.debug('liveUpdate request: %s, interval: %s' % (active, interval))
+        if active:
+            self.liveUpdater = LoopingCall(self.runLiveUpdates)
+            self.liveUpdater.start(interval)
+        else:
+            if self.liveUpdater:
+                log.debug('Stopping live updates')
+                self.liveUpdater.stop()
+        
+    def runLiveUpdates(self):
+        self.owner._touchTime = int(time.time())
+        log.debug('running Live update for %s' % self.name)
+        # Check for new data
+        for row in self.getSeries():
+            result = self.owner._fetchMetricData(self, row, returnData=True, end_time=int(time.time()), duration='1h', skipODW=True)
+        
+    def updateLiveElements(self, liveData, seriesId):
+        if len(self.liveElements):
+            # send the update to each element viewing this graph
+            for element in self.liveElements:
+                #we will need to pass the graph element id, as well as the series being updated with the
+                #actual live data 
+                for chart in self.liveElements[element]:
+                    element.liveUpdate(chartId, seriesId, liveData)
+        else:
+            log.debug('got a liveUpdate for a graph with no listeners')
+            self.liveUpdate(False)
         
     def getDataNodes(self):
         return self.dataNodes

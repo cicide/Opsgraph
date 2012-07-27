@@ -406,7 +406,7 @@ class Domain(Node):
     def getApi(self):
         return api_tool
     
-    def fetchData(self, api_uri, end_time=None, duration=None, creds={}, cookies={}, hsm=None, durSet=(), timeout=dataTimeout, returnData=True, retry=0):
+    def fetchData(self, api_uri, end_time=None, duration=None, creds={}, cookies={}, hsm=None, durSet=(), timeout=dataTimeout, returnData=True, skipODW=False, retry=0):
         log.debug('node data fetch request with timeout of %s' % timeout)
         if not duration:
             duration = graph_duration
@@ -423,7 +423,7 @@ class Domain(Node):
                     m_metric = m_service.getChild(metric)
                     if m_metric:
                         # the host, service, metric is valid, request the data
-                        result =  m_metric.getData(self.uri, self.api_tool, api_uri, end_time, durSet, headers=creds, cookies=cookies, timeout=timeout, returnData=returnData, retry=retry)
+                        result =  m_metric.getData(self.uri, self.api_tool, api_uri, end_time, durSet, headers=creds, cookies=cookies, timeout=timeout, returnData=returnData, skipODW=skipODW, retry=retry)
                         return result
                     else:
                         log.error('no valid metric found')
@@ -785,7 +785,7 @@ class Metric(Node):
         self.live = self.reactor.callLater(cacheLatency, self._getLiveData, uri, api_tool, h_s_m, int(time.time()), ('-', 1, 'h'), headers, cookies, timeout)
         return self.getData(uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout)
     
-    def getData(self, uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout, returnData=True, retry=0, start=None, end=None):
+    def getData(self, uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout, returnData=True, skipODW=False, retry=0, start=None, end=None):
         log.debug('get maybe cached data called with timeout of %s' % timeout)
         if (start and end):
             reqStart = start
@@ -828,7 +828,10 @@ class Metric(Node):
             return cacheResult
         else:
             # figure out source of data
-            dbi = self.parent.parent.parent.getOdw()
+            if skipODW:
+                dbi = False
+            else:
+                dbi = self.parent.parent.parent.getOdw()
             if dbi:
                 odwHost, odwDb, odwUser, odwPass = dbi
                 #hasOdw = False # TODO: odw fetch code doesn't exist

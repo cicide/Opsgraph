@@ -44,7 +44,9 @@ graph_types['HighCharts'] = {'Line': 'line',
                              'Spline': 'spline',
                              'Area': 'area',
                              'Area Spline': 'areaspline',
-                             'Scatter': 'scatter'
+                             'Scatter': 'scatter',
+                             'Column': 'column',
+                             'Bar': 'bar',
                             }
 graph_size = {}
 graph_size['Small'] = ('600','400')
@@ -126,7 +128,7 @@ class subscriber(object):
     def registerAvatarLogout(self, webSession):
         self.webSession = webSession
         
-    def registerLiveElement(self, liveElement, chart=None):
+    def registerLiveElement(self, liveElement, chart=None, chartId=None):
         if liveElement not in self.livePageList:
             # Register a new Live Element 
             self.livePageList.append(liveElement)
@@ -139,11 +141,11 @@ class subscriber(object):
                     log.debug('liveUpdate requested for an element already in my update list')
                 # Let the chart object know it's live - it will be responsible for getting fresh data
                 # and sending it to the live element
-                chart.addLiveElement(liveElement)
+                chart.addLiveElement(liveElement, chartId)
         elif chart:
             # Let the chart object know it's live
             self.liveCharts[liveElement].append(chart)
-            chart.addLiveElement(liveElement)
+            chart.addLiveElement(liveElement,chartId)
                 
     
     def unregisterLiveElement(self, liveElement):
@@ -600,7 +602,7 @@ class subscriber(object):
         d.addCallbacks(onTotalSuccess, onFailure)
         return d
 
-    def _fetchMetricData(self, chart, row, returnData=True):
+    def _fetchMetricData(self, chart, row, returnData=True, end_time=None, duration=None, skipODW=False):
         log.debug('trying to grab four items from %s' % chart.getSeriesTracker(row))
         log.debug('subscribers auth_list is %s' % self.auth_node_list)
         data_node, host, service, metric = chart.getSeriesTracker(row)
@@ -621,9 +623,10 @@ class subscriber(object):
         cookies = {'auth_tkt': self.auth_tkt}
         api_uri = '%s::%s::%s' % (host, service, metric)
         chart.setSeriesUri(row, data_node, api_uri)
-        end_time,duration = chart.calculateGraphPeriod()
+        if not end_time:
+            end_time,duration = chart.calculateGraphPeriod()
         #result = opsview.node_list[data_node].fetchData(api_uri, end_time, duration, creds, cookies, (host, service, metric))
-        result = defer.maybeDeferred(opsview.node_list[data_node].fetchData, api_uri, end_time, duration, creds, cookies, (host, service, metric), (chart.getChartDurationModifier(), chart.getChartDurationLength(), chart.getChartDurationUnit()), returnData=returnData)
+        result = defer.maybeDeferred(opsview.node_list[data_node].fetchData, api_uri, end_time, duration, creds, cookies, (host, service, metric), (chart.getChartDurationModifier(), chart.getChartDurationLength(), chart.getChartDurationUnit()), returnData=returnData, skipODW=skipODW)
         return result
 
     @_setTouchTime_decorator
