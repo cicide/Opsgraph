@@ -558,6 +558,7 @@ class subscriber(object):
     def buildMultiSeriesTimeObject(self, chart, chart_cell, data={}):
         if data:
             time_values, data_series = chart.getTimeValues(data)
+            log.debug(data_series)
             if chart.getEventsDisplay() != 'None':
                 events = self.getEventList(time_values, chart)
                 log.debug('got events: %s' % events)
@@ -567,10 +568,12 @@ class subscriber(object):
             if chart.getChartEngine() == 'FusionCharts':
                 #log.debug('building a fusion charts graph from %s' % data)
                 chart_object = chart.buildMultiSeriesTimeObject(time_values, data_series, events)
+                log.debug(chart_object)
                 return chart_object
             elif chart.getChartEngine() == 'HighCharts':
                 #log.debug('building a high charts graph from %s' % data)
                 chart_object = chart.buildHighChartsTimeObject(chart_cell, data_series, events)
+                log.debug(chart_object)
                 return chart_object
         else:
             return {}

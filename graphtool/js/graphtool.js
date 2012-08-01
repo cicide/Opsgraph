@@ -4,6 +4,8 @@ Extern = {};
 
 Extern.ExternWidget = Nevow.Athena.Widget.subclass('Extern.ExternWidget');
 
+var charts = {};  //global chart tracker
+
 Extern.ExternWidget.methods(
     function __init__(self, node) {
         Extern.ExternWidget.upcall(self, '__init__', node);
@@ -816,13 +818,14 @@ Extern.ExternWidget.methods(
     function addFusionChart(self, chartType, chartId, chartWidth, chartHeight, chart_data, chart_cell) {
         var theGraphCell = document.getElementById(chart_cell);
         var newChart = new FusionCharts("fusioncharts/"+chartType, chartId, chartWidth, chartHeight, "0", "1");
+        charts[chartId] = newChart;
         newChart.setJSONData(chart_data);
         newChart.render(chart_cell);
         var theSaveGraphButtonRow = document.getElementById('saveGraphButtonRow');
         theSaveGraphButtonRow.style.display = '';
     },
     
-    function addHighChart(self, chart_object) {
+    function addHighChart(self, chart_object, defChart) {
         var high_chart = new Object();
         //var chart_options = chart_object['plotOptions'];
         var chart_series = chart_object['series'];
@@ -856,6 +859,7 @@ Extern.ExternWidget.methods(
         chart_xAxis['plotBands'] = band_array;
         for (var i=0; i<series_count; i++) {
             var series_name = chart_series[i]['name'];
+            var series_id = chart_series[i]['seriesId']
             var series_data = chart_series[i]['data'];
             var series_data_count = series_data.length;
             var series_fmt_data = [];
@@ -868,6 +872,7 @@ Extern.ExternWidget.methods(
             var fmt_series = new Object();
             fmt_series.name = series_name;
             fmt_series.data = series_fmt_data;
+            fmt_series.id = series_id
             series_array.push(fmt_series);
         }
         // set the chart options
@@ -903,8 +908,26 @@ Extern.ExternWidget.methods(
         high_chart.title = chart_title;
         high_chart.series = series_array;
         var chart = new Highcharts.Chart(high_chart);
+        alert('creating high chart: ' + defChart);
+        charts[defChart] = chart;
+        alert('building chart: '+defChart);
         var theSaveGraphButtonRow = document.getElementById('saveGraphButtonRow');
         theSaveGraphButtonRow.style.display = '';
+    },
+    
+    function addPoint(self, chartId, seriesId, dataPoint) {
+        var theChart = charts[chartId];
+        var theSeries = theChart.get(seriesId);
+        //alert('charts: '+charts);
+        //alert('seriesId: '+seriesId);
+        //alert('theChart: '+ theChart);
+        var x_data = dataPoint[0];
+        var y_data = dataPoint[1];
+        var x_val = parseInt(x_data)*1000;
+        var y_val = parseFloat(y_data);
+        var x_y = [x_val, y_val];
+        theSeries.addPoint(x_y, true, true);
+        return false;
     },
     
     function onRowRemove(self, theRow) {

@@ -997,8 +997,13 @@ class ExternalElement(athena.LiveElement):
         
     def liveUpdate(self, chartId, seriesId, liveData):
         log.debug('got liveData for update')
+        #log.debug('chartId: %s' % chartId)
+        #log.debug('seriesId: %s' % seriesId)
         log.debug(liveData)
-        pass
+        for dataPoint in liveData:
+            #log.debug('sending live data to graph')
+            self.callRemote('addPoint', unicode(chartId), unicode(seriesId), [unicode(dataPoint),unicode(liveData[dataPoint])])
+        #log.debug('live data update complete!')
     
     def pageQuit(self):
         d = self.callRemote('reDirect', unicode('/'))
@@ -1007,11 +1012,6 @@ class ExternalElement(athena.LiveElement):
     def discon(self, result):
         log.debug('this live element has been disconnected')
         self.subscriber.unregisterLiveElement(self)
-
-    def liveUpdate(self, chartId, seriesId, liveData):
-        log.debug('got liveData for update')
-        log.debug(liveData)
-        pass
 
     def setItem(self, item, choice):
         log.debug('Setting %s to %s for %s' % (item, choice, self.subscriber.getUserName()))
@@ -1308,7 +1308,7 @@ class ExternalElement(athena.LiveElement):
                 self.callRemote('addFusionChart', unicode(graph_type), unicode(defChart), unicode(graph_width), unicode(graph_height), graph_object, unicode(chart_cell))
             elif self.chart.getChartEngine() == 'HighCharts':
                 log.debug('sending object as highchart')
-                self.callRemote('addHighChart', graph_object)
+                self.callRemote('addHighChart', graph_object, unicode(defChart))
             # register this chart as live
             self.subscriber.registerLiveElement(self, self.chart, defChart)
             return True

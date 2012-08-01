@@ -413,21 +413,30 @@ class chart(object):
                     log.debug('Stopping live updates')
                     self.liveUpdater.stop()
                     self.liveUpdater = None
-        
+
     def runLiveUpdates(self):
+        def onSuccess(result, seriesId):
+            log.debug(result)
+            cacheData = result['list'][0]['cacheData']
+            if len(cacheData):
+                self.updateLiveElements(cacheData, seriesId)
+        def onFailure(reason):
+            log.error(reason)
         self.owner._touchTime = int(time.time())
         log.debug('running Live update for %s' % self.name)
         # Check for new data
         for row in self.getSeries():
             result = self.owner._fetchMetricData(self, row, returnData=True, end_time=int(time.time()), extendCache=True, skipODW=True)
-        
+            result.addCallback(onSuccess, row).addErrback(onFailure)
+
     def updateLiveElements(self, liveData, seriesId):
         if len(self.liveElements):
             # send the update to each element viewing this graph
             for element in self.liveElements:
                 #we will need to pass the graph element id, as well as the series being updated with the
                 #actual live data 
-                for chart in self.liveElements[element]:
+                log.debug(self.liveElements[element])
+                for chartId in self.liveElements[element]:
                     element.liveUpdate(chartId, seriesId, liveData)
         else:
             log.debug('got a liveUpdate for a graph with no listeners')
@@ -686,7 +695,7 @@ class chart(object):
             data_series = []
             data_record_dict = {}
             log.debug('received data for graph object creation')
-            #log.debug(data)
+            log.debug(data)
             for series in data:
                 log.debug('Working on series: %s' % series)
                 # to-do: Handle Series with value None
@@ -733,6 +742,7 @@ class chart(object):
                         log.debug('unknown series data type')
                     #log.debug(data_dict)
                     series_list['data'] = data_dict
+                    series_list['seriesId'] = series
                 else:
                     series_list['data'] = {}
                 data_series.append(series_list)
@@ -799,7 +809,7 @@ class chart(object):
             # We will need to package up the series data into dictionaries with time: value format
             data_series = self.normalizeData(data)
             # We should now have a list with a dictionary for each series
-            # The dictionary should have the keys data, description, uom, and label
+            # The dictionary should have the keys data, description, uom, id, and label
             # inside the data item, we have a list of [time, value] lists
             # We need to build a list of all the time values in order, as the 
             #   different series might not have data for the same time values
@@ -814,7 +824,7 @@ class chart(object):
             for series in data_series:
                 tvList.append(series['data'].keys())
             # chain the lists of series x values into a single list
-            # set gives us in unordered set of objects, removing duplicates
+            # set gives us an unordered set of objects, removing duplicates
             # convert it back to a list for our use
             time_values = list(iter(set(chain(*tvList))))
             if not len(time_values):

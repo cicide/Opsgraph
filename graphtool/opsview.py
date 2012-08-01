@@ -641,7 +641,11 @@ class Metric(Node):
                     self.dataCache['label'] = dataLabel
                     self.dataCache['uom'] = dataUom
                 else:
+                    log.debug(dataSet)
+                    log.debug(len(dataSet))
                     newData = self._normalizeData(dataSet, timeRoundBase)
+                    log.debug(newData)
+                    log.debug(len(newData))
                     self.dataCache['data'].update(newData)
                 if returnData:
                     return self._getCachedData(start, end)
@@ -650,14 +654,14 @@ class Metric(Node):
 
     def _normalizeData(self, dataSet, roundBase):
         #convert x,y pairs in the dataSet into a dictionary
-        minX = maxX = minY = maxY = 0        
+        minX = maxX = minY = maxY = 0
         normalizedData = {}
         for x,y in dataSet:
             if str(y) == '':
                 y = None # this is not correct, need to check fusionchart/highcharts how to handle this
-            if timeRoundBase:
+            if roundBase:
                 # round all x values to the nearest timeRoundBase (from round_time value in the config file)
-                x = int(timeRoundBase * round(float(x)/timeRoundBase))
+                x = int(roundBase * round(float(x)/roundBase))
             else:
                 x = int(x)
                 if x < minX: minX = x
