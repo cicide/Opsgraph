@@ -578,12 +578,12 @@ class subscriber(object):
         else:
             return {}
 
-    def _makeGraph(self, result, chart):
+    def _makeGraph(self, result, chart, returnData, end_time, extendCache, skipODW):
         """ called from makeGraph when authentication has failed during a graph build"""
-        return self.makeGraph(chart)
+        return self.makeGraph(chart, returnData, end_time, extendCache, skipODW)
 
     @_setTouchTime_decorator
-    def makeGraph(self, chart):
+    def makeGraph(self, chart, returnData=True, end_time=None, extendCache=False, skipODW=False):
         def onTotalSuccess(result):
             log.debug('got all results!')
             return chart.getSeriesData()
@@ -597,7 +597,7 @@ class subscriber(object):
         chart.setDataNodes([])
         log.debug('graphing the following series: %s' % chart.getSeries())
         for row in chart.getSeries():
-            result = self._fetchMetricData(chart, row, returnData=True)
+            result = self._fetchMetricData(chart, row, returnData, end_time, extendCache, skipODW)
             if result:
                 result.addCallback(onSeriesSuccess, row)
                 ds.append(result)
@@ -618,7 +618,7 @@ class subscriber(object):
             # if we have exceeded our auth time, force a re-authentication.
             d = self.authenticateNode(data_node)
             log.debug('re-authentication requested')
-            d.addCallback(self._makeGraph,chart).addErrback(self.onFailure)
+            d.addCallback(self._makeGraph, chart, returnData, end_time, extendCache, skipODW).addErrback(self.onFailure)
             return d
         if data_node not in chart.getDataNodes():
             chart.addDataNode(data_node)
