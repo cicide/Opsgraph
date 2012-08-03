@@ -859,7 +859,7 @@ Extern.ExternWidget.methods(
         chart_xAxis['plotBands'] = band_array;
         for (var i=0; i<series_count; i++) {
             var series_name = chart_series[i]['name'];
-            var series_id = chart_series[i]['seriesId']
+            var series_id = chart_series[i]['seriesId'];
             var series_data = chart_series[i]['data'];
             var series_data_count = series_data.length;
             var series_fmt_data = [];
@@ -872,7 +872,7 @@ Extern.ExternWidget.methods(
             var fmt_series = new Object();
             fmt_series.name = series_name;
             fmt_series.data = series_fmt_data;
-            fmt_series.id = series_id
+            fmt_series.id = series_id;
             series_array.push(fmt_series);
         }
         // set the chart options
@@ -908,9 +908,7 @@ Extern.ExternWidget.methods(
         high_chart.title = chart_title;
         high_chart.series = series_array;
         var chart = new Highcharts.Chart(high_chart);
-        alert('creating high chart: ' + defChart);
         charts[defChart] = chart;
-        alert('building chart: '+defChart);
         var theSaveGraphButtonRow = document.getElementById('saveGraphButtonRow');
         theSaveGraphButtonRow.style.display = '';
     },
@@ -918,9 +916,6 @@ Extern.ExternWidget.methods(
     function addPoint(self, chartId, seriesId, dataPoint) {
         var theChart = charts[chartId];
         var theSeries = theChart.get(seriesId);
-        //alert('charts: '+charts);
-        //alert('seriesId: '+seriesId);
-        //alert('theChart: '+ theChart);
         var x_data = dataPoint[0];
         var y_data = dataPoint[1];
         var x_val = parseInt(x_data)*1000;

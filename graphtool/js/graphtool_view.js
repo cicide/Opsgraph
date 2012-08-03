@@ -4,6 +4,8 @@ ViewGraphs = {};
 
 ViewGraphs.ViewGraphWidget = Nevow.Athena.Widget.subclass('ViewGraphs.ViewGraphWidget');
 
+var charts = {} //global chart tracker
+
 ViewGraphs.ViewGraphWidget.methods(
 
     function __init__(self, node) {
@@ -22,7 +24,7 @@ ViewGraphs.ViewGraphWidget.methods(
         newChart.render('graphArea');
     },
     
-    function addHighChart(self, chart_object) {
+    function addHighChart(self, chart_object, defChart) {
         var high_chart = new Object();
         //var chart_options = chart_object['plotOptions'];
         var chart_series = chart_object['series'];
@@ -68,6 +70,7 @@ ViewGraphs.ViewGraphWidget.methods(
         // convert the unicodeized strings to ints and floats for series
         for (var i=0; i<series_count; i++) {
             var series_name = chart_series[i]['name'];
+            var series_id = chart_series[i]['seriesId'];
             var series_data = chart_series[i]['data'];
             var series_data_count = series_data.length;
             var series_fmt_data = [];
@@ -79,6 +82,7 @@ ViewGraphs.ViewGraphWidget.methods(
             }
             var fmt_series = new Object();
             fmt_series.name = series_name;
+            fmt_series.id = series_id;
             fmt_series.data = series_fmt_data;
             series_array.push(fmt_series);
         }
@@ -115,9 +119,22 @@ ViewGraphs.ViewGraphWidget.methods(
         high_chart.title = chart_title;
         high_chart.series = series_array;
         var chart = new Highcharts.Chart(high_chart);
+        charts[defChart] = chart;
         hostCell.onresize = function () {self.onHCCellResize(chart, hostCell);};
     },
     
+    function addPoint(self, chartId, seriesId, dataPoint) {
+        var theChart = charts[chartId];
+        var theSeries = theChart.get(seriesId);
+        var x_data = dataPoint[0];
+        var y_data = dataPoint[1];
+        var x_val = parseInt(x_data)*1000;
+        var y_val = parseFloat(y_data);
+        var x_y = [x_val, y_val];
+        theSeries.addPoint(x_y, true, true);
+        return false;
+    },
+
     function onHCCellResize(self, highChart, hostCell) {
         var $jq = jQuery.noConflict();
         var theHeight = $jq(hostCell).height();

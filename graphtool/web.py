@@ -410,10 +410,9 @@ class ViewGraphsElement(athena.LiveElement):
         self.subscriber.unregisterLiveElement(self)
 
     def liveUpdate(self, chartId, seriesId, liveData):
-        log.debug('got liveData for update')
-        log.debug(liveData)
-        pass
-    
+        for dataPoint in liveData:
+            self.callRemote('addPoint', unicode(chartId), unicode(seriesId), [unicode(dataPoint),unicode(liveData[dataPoint])])
+
     def initialize(self):
         def onGraphLoaded(result):
             log.debug(result)
@@ -436,22 +435,24 @@ class ViewGraphsElement(athena.LiveElement):
             #format the data for fusion charts
             chart_cell = 'graphArea'
             graph_object = self.subscriber.buildMultiSeriesTimeObject(chart, chart_cell, result)
+            if not graph_object:
+                return False
             #log.debug(graph_object)
             graph_settings = self.subscriber.getGraphSettings(chart)
             graph_type = graph_settings['graph_type']
             graph_width = graph_settings['graph_width']
             graph_height = graph_settings['graph_height']
-            #TODO: send the new unique Id back to the subscriber so we have access to this chart (need for live chart)
             defChart = '%s-%s' % (getRandString(8),time.time())
             if chart.getChartEngine() == 'FusionCharts':
                 self.callRemote('addFusionChart', unicode(graph_type), unicode(defChart), unicode('100%'), unicode('100%'), graph_object, unicode(chart_cell))
             elif chart.getChartEngine() == 'HighCharts':
-                self.callRemote('addHighChart', graph_object)
+                self.callRemote('addHighChart', graph_object, unicode(defChart))
             # register this chart as live
             self.subscriber.registerLiveElement(self, chart, defChart)
             #self.subscriber.returnToLastChart()
         def onFailure(reason):
             log.error(reason)
+            return False
         #get the data from opsview for the requested graph
         d = self.subscriber.makeGraph(chart)
         d.addCallbacks(onSuccess,onFailure)
@@ -560,9 +561,8 @@ class ViewSuitesElement(athena.LiveElement):
         self.subscriber.unregisterLiveElement(self)
 
     def liveUpdate(self, chartId, seriesId, liveData):
-        log.debug('got liveData for update')
-        log.debug(liveData)
-        pass
+        for dataPoint in liveData:
+            self.callRemote('addPoint', unicode(chartId), unicode(seriesId), [unicode(dataPoint),unicode(liveData[dataPoint])])
 
     def updateSuite(self, item, value):
         log.debug('Got suite update request for %s with value of %s' % (item, value))
@@ -605,9 +605,9 @@ class ViewSuitesElement(athena.LiveElement):
             if chart.getChartEngine() == 'FusionCharts':
                 self.callRemote('addFusionChart', unicode(chart_cell), unicode(graph_type), unicode(chart_uid), unicode('100%'), unicode('100%'), graph_object)
             elif chart.getChartEngine() == 'HighCharts':
-                self.callRemote('addHighChart', graph_object, unicode(dbId))
+                self.callRemote('addHighChart', graph_object, unicode(dbId), unicode(chart_uid))
             # register this graph as live for active updates
-            self.subscriber.registerLiveElement(self, chart, chart_cell)
+            self.subscriber.registerLiveElement(self, chart, chart_uid)
             return True
         def onFailure(reason):
             log.error(reason)
@@ -806,11 +806,6 @@ class LoadSuitesElement(athena.LiveElement):
         log.debug('this live element has been disconnected')
         self.subscriber.unregisterLiveElement(self)
 
-    def liveUpdate(self, chartId, seriesId, liveData):
-        log.debug('got liveData for update')
-        log.debug(liveData)
-        pass
-    
     def initialize(self):
         def onSuccess(result):
             return result # return the result through a deferred
@@ -923,11 +918,6 @@ class LoadGraphsElement(athena.LiveElement):
         log.debug('this live element has been disconnected')
         self.subscriber.unregisterLiveElement(self)
         
-    def liveUpdate(self, chartId, seriesId, liveData):
-        log.debug('got liveData for update')
-        log.debug(liveData)
-        pass
-    
     def initialize(self):
         def onSuccess(result):
             self.callRemote('addGraphListings', result)
@@ -996,14 +986,8 @@ class ExternalElement(athena.LiveElement):
         self.regexpCellId = {'d': unicode('nodeRegexp'), 'h': unicode('hostRegexp'), 's': unicode('serviceRegexp'), 'm': unicode('metricRegexp')}
         
     def liveUpdate(self, chartId, seriesId, liveData):
-        log.debug('got liveData for update')
-        #log.debug('chartId: %s' % chartId)
-        #log.debug('seriesId: %s' % seriesId)
-        log.debug(liveData)
         for dataPoint in liveData:
-            #log.debug('sending live data to graph')
             self.callRemote('addPoint', unicode(chartId), unicode(seriesId), [unicode(dataPoint),unicode(liveData[dataPoint])])
-        #log.debug('live data update complete!')
     
     def pageQuit(self):
         d = self.callRemote('reDirect', unicode('/'))
@@ -1301,7 +1285,6 @@ class ExternalElement(athena.LiveElement):
             graph_width = graph_settings['graph_width']
             graph_height = graph_settings['graph_height']
             log.debug('graph settings returned')
-            #TODO: send the new unique Id back to the subscriber so we have access to this chart (need for live chart)
             defChart = '%s-%s' % (getRandString(8),time.time())
             if self.chart.getChartEngine() == 'FusionCharts':
                 log.debug('sending object as fusionchart')
