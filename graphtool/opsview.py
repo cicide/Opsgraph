@@ -4,6 +4,7 @@ from twisted.names import client as dns_client
 from twisted.web import client as web_client
 from twisted.internet import defer, reactor
 from paste.auth import auth_tkt
+from bisect import bisect
 
 import json, time, datetime, urllib, exceptions
 import utils, rest_api, txdbinterface
@@ -22,8 +23,198 @@ node_list = {}
 event_type_list = ['outage', 'event']
 loginTimeout = 10
 dataTimeout = 20
-cacheLife = 3600 # dump any cache that hasn't been used in 60 mins
+cacheDict = {} # dictionary of cache objects name: object
+cacheLife = 28800 # dump any cache that hasn't been used in 8 hours
 cacheLatency = 300 # don't fetch new data if newest data in cache is less than 5 mins old
+
+class TimelineCache(object):
+    
+    """ General data cache.  Cache is referenced by name and contains x,y data sets in a dictionary"""
+    
+    def __init__(self, name, normalize=False):
+        self.name = name
+        self.data = {}
+        self.defaultNormalize = normalize # a value in seconds
+        self.normalizedData = {} # dictionary storing normalized
+        if self.defaultNormalize:
+            self.normalizedData[self.defaultNormalize] = {}
+        self.label = None
+        self.uom = None
+        self.createTime = self.usageTime = int(time.time())
+    
+    def _expire(self):
+        self._ackTouch()
+        self.data = {}
+        self.label = self.uom = None
+        self.normalizedData = {}
+        
+    def _ackTouch(self):
+        self.usageTime = int(time.time())
+    
+    def _normalizeData(self, dataSet, roundBase=0):
+        log.debug('normalizing data')
+        maxX = maxY = minX = minY = 0 
+        normalizeData = {}
+        for x in dataSet:
+            y = dataSet[x]
+            if str(y) == '':
+                y = None # 
+            if roundBase:
+                # round all x values to the nearest roundBase
+                x = int(roundBase * round(float(x)/roundBase))
+            else:
+                x = int(x)
+            if x < minX: minX = x
+            if x > maxX: maxX = x
+            if y:
+                y = float(y)
+                if y < minY: minY = y
+                if y > maxY: maxY = y
+            else:
+                y = '' #this allows fusion and high charts to recognize this as missing data
+            normalizeData[x] = y
+        log.debug('returning normalized data')
+        log.debug(normalizeData)
+        return normalizeData
+    
+    def getCacheTimeValueRange(self):
+        self._ackTouch()
+        if len(self.data):
+            return int(min(self.data.keys())),int(max(self.data.keys()))
+        else:
+            return 0,0
+        
+    def addData(self, label, uom, data):
+        self._ackTouch()
+        if not data:
+            log.error('cache add with no supplied data')
+        else:
+            flushBeforeAdd = False
+            if self.label:
+                if self.label != label:
+                    log.warning('previous label %s does not match new label: %s, flushing old data' % (self.label, label))
+                    flushBeforeAdd = True
+                    self.label = label
+            else:
+                self.label = label
+            if self.uom:
+                if self.uom != uom:
+                    log.warning('previous uom %s does not match new uom: %s, flushing old data' % (self.uom, uom))
+                    flushBeforeAdd = True
+                    self.uom = uom
+            else:
+                self.uom = uom
+            # If the supplied data had a different uom or label, then we need to flush the old 
+            # data which is most likely invalid
+            if flushBeforeAdd:
+                self.data = {}
+                if len(self.normalizedData):
+                    for normalize in self.normalizedData:
+                        self.normalizedData[normalize] = {}
+            # if the data is handed to us as a list, then convert it to a dict
+            if type(data) == list:
+                data = {a: b for a,b in data}
+            # get the time values from the supplied data that are not currently in the cache
+            addList = list(set(data.keys())-set(self.data.keys()))
+            if addList:
+                for tv in addList:
+                    self.data[tv] = data[tv]
+                log.debug('added %i items to cache' % len(addList))
+            else:
+                log.debug('cache already has all supplied data')
+            if len(self.normalizedData):
+                # we have normalized data in the cache, add newly supplied data for normalization
+                for normalizeValue in self.normalizedData.keys():
+                    addList = list(set(data.keys()) - set(self.normalizedData[normalizeValue]))
+                    if len(addList) == len(data):
+                        normData = self._normalizeData(data, normalizeValue)
+                    else:
+                        preNorm = {}
+                        for tv in addList:
+                            preNorm[tv] = data[tv]
+                        normData = self._normalizeData(preNorm, normalizeValue)
+                    self.normalizedData[normalizeValue].update(normData)
+
+    def getData(self, start, end, normalize=None):
+        self._ackTouch()
+        if normalize:
+            log.debug('normalized data requested with a round Base of %s' % normalize)
+            # if normalized data is requested, return the normalized data
+            if normalize in self.normalizedData:
+                log.debug('pre-normalized data found')
+                dataSet = self.normalizedData[normalize]
+                log.debug(dataSet)
+            elif len(self.data):
+                # the normalize value requested isn't calculated, so we must calculate it
+                #dataSet = self.normalizedData[normalize] = self._normalizeData(self.data, roundBase=normalize)
+                dataSet = self._normalizeData(self.data, roundBase=normalize)
+                log.debug('got normalized data')
+                log.debug(dataSet)
+                self.normalizedData[normalize] = dataSet
+                log.debug('saved Normalized data')
+            else:
+                log.debug('no data to normalize')
+                dataSet = None
+            log.debug('how did I get here?')
+            log.debug(dataSet)
+        elif len(self.data):
+            dataSet = self.data
+        else:
+            dataSet = None
+        log.debug('working with cached dataSet:')
+        log.debug(dataSet)
+        if not dataSet:
+            log.debug('returning an empty dataSet')
+            return {'list': [{'label': self.label, 'uom': self.uom, 'cacheData': {}}]}
+        else:
+            dataRange = dataSet.keys()
+            dataRange.sort()
+            # we now have a sorted list of all the x values in the cached data
+            # use bisect to get a set that contains only the requested range
+            # bisect doesn't include exactly matched values, so make our bisect values 1 larger/smaller
+            bStart = int(start) - 1
+            bEnd = int(end) + 1
+            rangeStart = bisect(dataRange, bStart)
+            rangeEnd = bisect(dataRange, bEnd)
+            reqRange = dataRange[rangeStart:rangeEnd]
+            returnSet = {}
+            returnData = {str(key): dataSet[key] for key in reqRange}
+            returnSet['cacheData'] = returnData
+            returnSet['label'] = self.label
+            returnSet['uom'] = self.uom
+            log.debug('returning a full dataSet')
+            log.debug(returnData)
+            return {'list': [returnSet]}
+            
+    def isCached(self, start, end):
+        isInCache = True
+        if len(self.data) == 0:
+            return False, start, end
+        timeValues = self.data.keys()
+        timeValues.sort()
+        cacheLow = int(timeValues[0])
+        cacheHigh = int(timeValues[len(timeValues)-1])
+        inStart = bisect(timeValues, start+cacheLatency)
+        inEnd = bisect(timeValues, end-cacheLatency)
+        if inEnd == 0:
+            # requesting data earlier than cacheStart
+            fetchEnd = end
+            isInCache = False
+        else:
+            # end is within cache limits
+            fetchEnd = cacheHigh + 1
+        if inStart >= len(timeValues):
+            if inStart < (cacheHigh + cacheLatency):
+                # start is within allowed latency of cache high
+                fetchStart = cacheLow - 1
+            else:
+                # requestion data later than cacheStart
+                fetchStart = start
+                isInCache = False
+        else:
+            # start is within cache limits
+            fetchStart = cacheLow - 1
+        return isInCache, fetchStart, fetchEnd
 
 class OdwError(exceptions.Exception):
     """ Error received while attempting fetch ODW Data """
@@ -48,6 +239,12 @@ class Node(object):
     def getChildren(self):
         return self.children 
 
+    def getParent(self):
+        return self.parent
+    
+    def getName(self):
+        return self.name
+    
     def searchChildren(self, pattern):
         returnList = {}
         pat = re.compile(pattern, re.I)
@@ -67,6 +264,7 @@ class Domain(Node):
     def __init__(self, name, host, login, passwd, shared_secret, api_tool, rescan, odwHost, odwDb, odwUser, odwPass):
         Node.__init__(self, name, "Domain")
         self.host = host.split('//')[1]
+        self.name = name
         self.uri = host
         self.login = login
         self.password = passwd
@@ -190,7 +388,7 @@ class Domain(Node):
             # Re login to opsview server
             log.debug("Relogging in into opsview server")
             self.masterLoginToken = None
-            log.debug('OnInitErr: Scheduling a rescan for in one minute')
+            log.debug('OnInitErr: Scheduling a rescan for ten seconds')
             reactor.callLater(10, self.initialize)
             self.rescan_sched = int(time.time()) + 10
             #return False
@@ -287,10 +485,11 @@ class Domain(Node):
                 log.debug('Metric list is %s records long' % len(host_metric_list))
                 for row in host_metric_list:
                     host,service,metric = row.split('::')
+                    metricUniqueId = 'opsview::%s::%s' % (self.name, row)
                     if( service and metric):
                         host = self.getHostByName(str(host))
                         if host:
-                            host.addServiceMetric(service, metric)
+                            host.addServiceMetric(service, metric, metricUniqueId)
                         else:
                             log.error("Host doesn't exist %s for row %s" % (host, row))
                     else:
@@ -503,14 +702,14 @@ class Host(Node):
         self.metric_count = 0
         #log.debug('host %s added' % self.name)
         
-    def addServiceMetric(self, serviceName, metric=None):
+    def addServiceMetric(self, serviceName, metric=None, metricUniqueId=None):
         #log.debug('Adding service metric %s::%s to host %s' % (str(service), str(metric), self.name))
         serviceName = str(serviceName)
         service = self.getServiceByName(serviceName)
         if metric:
             metric = str(metric)
             if service:
-                met = Metric(metric)
+                met = Metric(metric, metricUniqueId)
                 self.metric_count += 1
                 service.addChild(met)
             else:
@@ -578,34 +777,23 @@ class Service(Node):
 
 class Metric(Node):
     # we cache data for a metric here
-    def __init__(self, name):
+    def __init__(self, name, uniqueId):
         Node.__init__(self, name, "Metric")
-        self.dataCache = {}
+        #self.dataCache = {}
+        self.uniqueId = uniqueId
+        if self.uniqueId in cacheDict:
+            self.dataCache = cacheDict[self.uniqueId]
+        else:
+            self.dataCache = cacheDict[self.uniqueId] = TimelineCache(uniqueId)
         self.touched = int(time.time())
         self.cacheLastHit = 0
         self.cacheExpire = None
         self.live = None
         
     def getMaxCacheTimeValue(self):
-        if len(self.dataCache):
-            if 'data' in self.dataCache:
-                return max(self.dataCache['data'].keys())
-            else:
-                return 0
-        else:
-            return 0
-        
-    def _ackCacheHit(self):
-        """ called whenever we need to mark the cache as freshened """
-        self.cacheLastHit = int(time.time())
-        if self.cacheExpire:
-            self.cacheExpire.cancel()
-        self.cacheExpire = reactor.callLater(cacheLife, self._expireCache)
+        minValue,maxValue = self.dataCache.getCacheTimeValueRange()
+        return maxValue
 
-    def _expireCache(self):
-        log.debug('cache has expired for metric')
-        self.cacheExpire = self.dataCache = None
-        
     def _cacheAndReturnData(self, data, start, end, returnData=True):
         """ add fetched data to cache """
         if not data:
@@ -632,78 +820,14 @@ class Metric(Node):
                 #dataAvg = description['Average']
                 dataUom = resultSet['uom']
                 dataLabel = resultSet['label']
-                
-                if self.dataCache == None:
-                    self.dataCache = {}
-
-                if not 'data' in self.dataCache:
-                    self.dataCache['data'] = self._normalizeData(dataSet, timeRoundBase)
-                    self.dataCache['label'] = dataLabel
-                    self.dataCache['uom'] = dataUom
-                else:
-                    log.debug(dataSet)
-                    log.debug(len(dataSet))
-                    newData = self._normalizeData(dataSet, timeRoundBase)
-                    log.debug(newData)
-                    log.debug(len(newData))
-                    self.dataCache['data'].update(newData)
+                log.debug(dataSet)
+                self.dataCache.addData(dataLabel, dataUom, dataSet)
                 if returnData:
-                    return self._getCachedData(start, end)
+                    log.debug('returning cached data')
+                    return self.dataCache.getData(start, end, timeRoundBase)
                 else:
+                    log.debug('not returning any data')
                     return False
-
-    def _normalizeData(self, dataSet, roundBase):
-        #convert x,y pairs in the dataSet into a dictionary
-        minX = maxX = minY = maxY = 0
-        normalizedData = {}
-        for x,y in dataSet:
-            if str(y) == '':
-                y = None # this is not correct, need to check fusionchart/highcharts how to handle this
-            if roundBase:
-                # round all x values to the nearest timeRoundBase (from round_time value in the config file)
-                x = int(roundBase * round(float(x)/roundBase))
-            else:
-                x = int(x)
-                if x < minX: minX = x
-                if x > maxX: maxX = x
-            if y:
-                y = float(y)
-                if y < minY: minY = y
-                if y > maxY: maxY = y
-            else:
-                y = '' # this allows fusioncharts and highcharts to recognize this is missing data
-            normalizedData[x] = y
-        return normalizedData
-    
-    def _getCachedData(self, start, end):
-        log.debug('returning cached data')
-        if not self.dataCache:
-            return {}
-        data = self.dataCache['data']
-        dataRange = data.keys()
-        dataRange.sort()
-        # we now have a sorted list of all the x values in the cached data
-        # use bisect to get a set that contains only the requested range
-        # bisect doesn't include exactly matched values, so make our bisect values 1 larger/smaller
-        bStart = int(start) - 1
-        bEnd = int(end) + 1
-        from bisect import bisect
-        rangeStart = bisect(dataRange, bStart)
-        rangeEnd = bisect(dataRange, bEnd)
-        # build the requested data object
-        reqRange = dataRange[rangeStart:rangeEnd]
-        returnSet = {}
-        # we were returning a list that we then turned back into a dict, return a dict instead
-        #dataSet = []
-        #for valX in reqRange:
-        #    dataSet.append([valX, data[valX]])
-        #returnSet['data'] = dataSet
-        dataSet = {str(key): data[key] for key in reqRange}
-        returnSet['cacheData'] = dataSet
-        returnSet['label'] = self.dataCache['label']
-        returnSet['uom'] = self.dataCache['uom']
-        log.debug('returning cached data with %s records' % len(dataSet))
-        return {'list': [returnSet]}
 
     def _calcBeginEnd(self, end_time, durSet):
         """ return min and max x for requested time period"""
@@ -728,17 +852,21 @@ class Metric(Node):
         else:
             end = end_time
             start = end_time - int(durLen) * durUval
+        log.debug('calculating start and end time from end_time and duration.')
+        log.debug(end_time)
+        log.debug(durSet)
+        log.debug('calculated start: %s, calculated end: %s' % (start,end))
         return start, end
 
 
             
-    def _fetchRestData(self, uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=0, returnData=True):
+    def _fetchRestData(self, uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=0, returnData=True, missStart=None, missEnd=None):
         def onSuccess(result, reqStart, reqEnd):
             #we got back a result from our data fetch request - add it to our cache and set our timestamp
             #return the result to the calling function
             log.debug('got metric api request back')
             return self._cacheAndReturnData(result, reqStart, reqEnd, returnData)
-        def onFailure(result, uri=None, api_tool=None, headers=None, cookies=None, reqStart=None, reqEnd=None, timeout=dataTimeout, retry=0):
+        def onFailure(result, uri=None, api_tool=None, headers=None, cookies=None, reqStart=None, reqEnd=None, timeout=dataTimeout, retry=0, returnData=True, missStart=None, missEnd=None):
             #trap possible errors here
             l = result.trap(rest_api.ApiError, defer.CancelledError)
             if l == rest_api.ApiError:
@@ -746,7 +874,7 @@ class Metric(Node):
                 if uri:
                     if retry < 3:
                         log.debug('got api error, retrying')
-                        return self.fetchRestData(uri, api_tool, headers, cookies, reqStart, reqEnd, timeout, retry)
+                        return self.fetchRestData(uri, api_tool, headers, cookies, reqStart, reqEnd, timeout, retry=retry, returnData=returnData, missStart=missStart, missEnd=missEnd)
                     else:
                         log.debug('too many retries')
                         return result
@@ -759,14 +887,21 @@ class Metric(Node):
             else:
                 log.debug('got error: %s' % result)
                 return result
-        #url = '%s?hsm=%s&end=%s&duration=%s' % (api_tool, urllib.quote_plus(uri), end_time, duration)
-        url = '%s?hsm=%s&start=%s&end=%s' % (api_tool, urllib.quote_plus(h_s_m), reqStart, reqEnd)
+        if missStart is not None:
+            fetchStart = missStart
+        else:
+            fetchStart = reqStart
+        if missEnd is not None:
+            fetchEnd = missEnd
+        else:
+            fetchEnd = reqEnd
+        url = '%s?hsm=%s&start=%s&end=%s' % (api_tool, urllib.quote_plus(h_s_m), fetchStart, fetchEnd)
         log.debug('requesting %s from %s' % (url, uri))        
         d = rest_api.getInfo(uri, str(url), headers=headers, cookies=cookies, timeout=timeout)
-        d.addCallback(onSuccess, reqStart, reqEnd).addErrback(onFailure, uri, api_tool, headers, cookies, reqStart, reqEnd, timeout, retry)
+        d.addCallback(onSuccess, reqStart, reqEnd).addErrback(onFailure, uri, api_tool, headers, cookies, reqStart, reqEnd, timeout, retry=retry, returnData=returnData, missStart=missStart, missEnd=missEnd)
         return d
     
-    def _fetchOdwData(self, odwHost, odwDb, odwUser, odwPass, hsm, reqStart, reqEnd, uri=None, api_tool=None, headers=None, cookies=None, timeout=None, retry=0, returnData=True):
+    def _fetchOdwData(self, odwHost, odwDb, odwUser, odwPass, hsm, reqStart, reqEnd, uri=None, api_tool=None, headers=None, cookies=None, timeout=None, retry=0, returnData=True, missStart=None, missEnd=None):
         def onSuccess(result, reqStart, reqEnd, hsm):
             log.debug('got metric odw request back')
             metricResult = result[0]
@@ -791,7 +926,7 @@ class Metric(Node):
                     return None
                 else:
                     log.debug('falling back to rest request')
-                    return self._fetchRestData(uri, api_tool, hsm, headers, cookies, timeout, reqStart, reqEnd, retry)
+                    return self._fetchRestData(uri, api_tool, hsm, headers, cookies, timeout, reqStart, reqEnd, retry=retry, returnData=returnData, missStart=missStart, missEnd=missEnd)
         def onFailure(reason):
             log.debug('got db error')
             if not uri:
@@ -799,15 +934,23 @@ class Metric(Node):
                 return reason
             else:
                 log.debug('falling back to rest request')
-                return self._fetchRestData(uri, api_tool, hsm, headers, cookies, timeout, reqStart, reqEnd, retry)
+                return self._fetchRestData(uri, api_tool, hsm, headers, cookies, timeout, reqStart, reqEnd, retry=retry, returnData=returnData, missStart=missStart, missEnd=missEnd)
         host, service, metric = hsm.split('::')
-        if int(time.time() - reqEnd) < 1000:
+        if missStart is not None:
+            fetchStart = missStart
+        else:
+            fetchStart = reqStart
+        if missEnd is not None:
+            fetchEnd = missEnd
+        else:
+            fetchEnd = reqEnd
+        if int(time.time() - fetchEnd) < 1000:
             if uri:
                 tmpReqStart = int(time.time() - 1200)
                 tmpReqEnd = int(time.time())
                 log.debug('getting lastest 15 minutes of data via rest api')
                 tmp = self._fetchRestData(uri, api_tool, hsm, headers, cookies, timeout, tmpReqStart, tmpReqEnd, retry, False)
-        d = txdbinterface.loadOdwData(odwHost, odwDb, odwUser, odwPass, host, service, metric, reqStart, reqEnd)
+        d = txdbinterface.loadOdwData(odwHost, odwDb, odwUser, odwPass, host, service, metric, fetchStart, fetchEnd)
         d.addCallback(onSuccess, reqStart, reqEnd, hsm).addErrback(onFailure)
         return d
     
@@ -823,40 +966,9 @@ class Metric(Node):
         else:
             reqStart, reqEnd = self._calcBeginEnd(end_time, durSet)
         # check to see if the cache contains all the data we need
-        if (self.dataCache == None) or ('data' not in self.dataCache):
-            # nothing in the cache!
-            log.debug('cache is empty')
-            cacheResult = None
-        else:
-            log.debug('checking cache contents ')
-            dataKeys = self.dataCache['data'].keys()
-            dataKeys.sort()
-            log.debug('Now is %s' % int(time.time()))
-            log.debug('requested start: %s' % reqStart)
-            log.debug('requested end: %s' % reqEnd)
-            log.debug('cache start: %s' % dataKeys[0])
-            log.debug('cache end: %s' % dataKeys[len(dataKeys)-1])
-            from bisect import bisect
-            inStart = bisect(dataKeys, reqStart+cacheLatency)
-            inEnd = bisect(dataKeys, reqEnd-cacheLatency)
-            log.debug('inStart: %i' % inStart)
-            log.debug('inEnd: %i' % inEnd)
-            if (inStart and inEnd < len(dataKeys)):
-                #we have a valid cache hit
-                log.debug('valid full cache hit')
-                cacheResult = self._getCachedData(reqStart, reqEnd)
-            else:
-                maxX = dataKeys[-1]
-                minX = dataKeys[0]
-                log.debug('cache does not cover request range')
-                log.debug('requested start %i is %i less than cache min %i' % (reqStart, minX-reqStart, minX))
-                log.debug('request end %i is %i more than cache max %i' % (reqEnd, reqEnd-maxX, maxX))
-                cacheResult = None
-                # we don't have a valid cache hit
-        if cacheResult:
-            log.debug('returning cached data')
-            self._ackCacheHit()
-            return cacheResult
+        isCached, missStart, missEnd = self.dataCache.isCached(reqStart, reqEnd)
+        if isCached:
+            return self.dataCache.getData(reqStart, reqEnd, normalize=timeRoundBase)
         else:
             # figure out source of data
             if skipODW:
@@ -865,17 +977,16 @@ class Metric(Node):
                 dbi = self.parent.parent.parent.getOdw()
             if dbi:
                 odwHost, odwDb, odwUser, odwPass = dbi
-                #hasOdw = False # TODO: odw fetch code doesn't exist
                 hasOdw = True
             else:
                 hasOdw = False
             if hasOdw:
-                log.debug('fetching data from ODW')
-                d = self._fetchOdwData(odwHost, odwDb, odwUser, odwPass, h_s_m, reqStart, reqEnd, uri, api_tool, headers, cookies, timeout, retry=retry, returnData=returnData)
+                log.debug('fetching missing data from ODW')
+                d = self._fetchOdwData(odwHost, odwDb, odwUser, odwPass, h_s_m, reqStart, reqEnd, uri, api_tool, headers, cookies, timeout, retry=retry, returnData=returnData, missStart=missStart, missEnd=missEnd)
                 return d
             else:
-                log.debug('fetching data from API')
-                return self._fetchRestData(uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=retry, returnData=returnData)
+                log.debug('fetching missing data from API')
+                return self._fetchRestData(uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=retry, returnData=returnData, missStart=missStart, missEnd=missEnd)
             
 
     def makeLive(self, uri, api_tool, h_s_m, headers, cookies, timeout):

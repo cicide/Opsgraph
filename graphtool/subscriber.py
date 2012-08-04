@@ -588,6 +588,8 @@ class subscriber(object):
             log.debug('got all results!')
             return chart.getSeriesData()
         def onSeriesSuccess(result, series_id):
+            log.debug('sending data to chart object')
+            log.debug(result)
             chart.setSeriesData(series_id, result)
         def onFailure(reason):
             log.error(reason)
@@ -601,6 +603,8 @@ class subscriber(object):
             if result:
                 result.addCallback(onSeriesSuccess, row)
                 ds.append(result)
+            else:
+                log.debug('oops, somehow our fetchMetricData request failed')
         d = defer.DeferredList(ds, consumeErrors=False)
         d.addCallbacks(onTotalSuccess, onFailure)
         return d
@@ -642,6 +646,8 @@ class subscriber(object):
             durSet = None
             log.debug('end set to now, no need to calculate')
         log.debug('end time: %s' % end_time )
+        log.debug('startTime: %s' % startTime)
+        log.debug('endTime: %s' % endTime)
         #result = opsview.node_list[data_node].fetchData(api_uri, end_time, duration, creds, cookies, (host, service, metric))
         result = defer.maybeDeferred(opsview.node_list[data_node].fetchData, api_uri, end_time, creds=creds, cookies=cookies, hsm=(host, service, metric), durSet=durSet, endTime=endTime, startTime=startTime, returnData=returnData, skipODW=skipODW)
         return result
