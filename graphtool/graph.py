@@ -384,10 +384,10 @@ class chart(object):
                 log.debug('chartId %s is already being live updated for this element' % chartId)
         if self.start == 'Now':
             log.debug('enable live updates for chart')
-            self.liveUpdate(True, 180)
+            self.liveUpdate(True, 150)
         elif (time.time() - self.start) < 301:
             log.debug('enable live updates for chart with start time within five minutes')
-            self.liveUpdate(True, 180)
+            self.liveUpdate(True, 150)
         else:
             log.debug('graph end time is too old to be made live')
             

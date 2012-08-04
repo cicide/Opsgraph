@@ -52,7 +52,6 @@ class TimelineCache(object):
         self.usageTime = int(time.time())
     
     def _normalizeData(self, dataSet, roundBase=0):
-        log.debug('normalizing data')
         maxX = maxY = minX = minY = 0 
         normalizeData = {}
         for x in dataSet:
@@ -73,8 +72,6 @@ class TimelineCache(object):
             else:
                 y = '' #this allows fusion and high charts to recognize this as missing data
             normalizeData[x] = y
-        log.debug('returning normalized data')
-        log.debug(normalizeData)
         return normalizeData
     
     def getCacheTimeValueRange(self):
@@ -114,6 +111,17 @@ class TimelineCache(object):
             # if the data is handed to us as a list, then convert it to a dict
             if type(data) == list:
                 data = {a: b for a,b in data}
+            # remove any training data with no y value
+            tv = data.keys()
+            tv.sort()
+            while len(data):
+                timeVal = tv[len(data)-1]
+                if data[timeVal] in (None, ''):
+                    log.debug('removing a null value from the end of the data for %s' % timeVal)
+                    data.pop(timeVal)
+                else:
+                    log.debug('done trimming null values')
+                    break
             # get the time values from the supplied data that are not currently in the cache
             addList = list(set(data.keys())-set(self.data.keys()))
             if addList:
@@ -138,33 +146,21 @@ class TimelineCache(object):
     def getData(self, start, end, normalize=None):
         self._ackTouch()
         if normalize:
-            log.debug('normalized data requested with a round Base of %s' % normalize)
             # if normalized data is requested, return the normalized data
             if normalize in self.normalizedData:
-                log.debug('pre-normalized data found')
                 dataSet = self.normalizedData[normalize]
-                log.debug(dataSet)
             elif len(self.data):
                 # the normalize value requested isn't calculated, so we must calculate it
                 #dataSet = self.normalizedData[normalize] = self._normalizeData(self.data, roundBase=normalize)
                 dataSet = self._normalizeData(self.data, roundBase=normalize)
-                log.debug('got normalized data')
-                log.debug(dataSet)
                 self.normalizedData[normalize] = dataSet
-                log.debug('saved Normalized data')
             else:
-                log.debug('no data to normalize')
                 dataSet = None
-            log.debug('how did I get here?')
-            log.debug(dataSet)
         elif len(self.data):
             dataSet = self.data
         else:
             dataSet = None
-        log.debug('working with cached dataSet:')
-        log.debug(dataSet)
         if not dataSet:
-            log.debug('returning an empty dataSet')
             return {'list': [{'label': self.label, 'uom': self.uom, 'cacheData': {}}]}
         else:
             dataRange = dataSet.keys()
@@ -182,38 +178,70 @@ class TimelineCache(object):
             returnSet['cacheData'] = returnData
             returnSet['label'] = self.label
             returnSet['uom'] = self.uom
-            log.debug('returning a full dataSet')
-            log.debug(returnData)
+            log.debug(returnSet)
             return {'list': [returnSet]}
             
     def isCached(self, start, end):
+        # start time is the oldest time, and end is the youngest
         isInCache = True
         if len(self.data) == 0:
             return False, start, end
-        timeValues = self.data.keys()
+        timeValues = [int(i) for i in self.data.keys()]
         timeValues.sort()
-        cacheLow = int(timeValues[0])
-        cacheHigh = int(timeValues[len(timeValues)-1])
-        inStart = bisect(timeValues, start+cacheLatency)
-        inEnd = bisect(timeValues, end-cacheLatency)
-        if inEnd == 0:
+        cacheLow = timeValues[0] - cacheLatency
+        cacheHigh = timeValues[len(timeValues)-1] + cacheLatency
+        log.debug('checking cache values')
+        log.debug('requested start: %s' % start)
+        log.debug('cache start: %s' % timeValues[0])
+        log.debug('cache low w/latency: %s' % cacheLow)
+        log.debug('requested end: %s' % end)
+        log.debug('cache end: %s' % timeValues[len(timeValues)-1])
+        log.debug('cache high w/latency: %s' % cacheHigh)
+        #inStart = bisect(timeValues, end)
+        #inEnd = bisect(timeValues, start)
+        #log.debug('inEnd: %s' % inEnd)
+        #log.debug('inStart: %s' % inStart)
+        if start < cacheLow:
+            log.debug('end falls outside of cache')
             # requesting data earlier than cacheStart
             fetchEnd = end
             isInCache = False
         else:
             # end is within cache limits
+            log.debug('end within cache range')
             fetchEnd = cacheHigh + 1
-        if inStart >= len(timeValues):
-            if inStart < (cacheHigh + cacheLatency):
-                # start is within allowed latency of cache high
-                fetchStart = cacheLow - 1
-            else:
-                # requestion data later than cacheStart
-                fetchStart = start
-                isInCache = False
+        if end > cacheHigh:
+            log.debug('start outside of cache range')
+            # request data later than cacheStart
+            fetchStart = start
+            isInCache = False
         else:
-            # start is within cache limits
-            fetchStart = cacheLow - 1
+            log.debug('start inside of cache range')
+            fetchStart = start
+
+        #if inEnd == 0:
+            #log.debug('end falls outside of cache')
+            ## requesting data earlier than cacheStart
+            #fetchEnd = end
+            #isInCache = False
+        #else:
+            ## end is within cache limits
+            #log.debug('end within cache range')
+            #fetchEnd = cacheHigh + 1
+        #if inStart >= len(timeValues):
+            #if inStart < cacheHigh:
+                #log.debug('start within cache range')
+                ## start is within allowed latency of cache high
+                #fetchStart = cacheLow - 1
+            #else:
+                #log.debug('start outside of cache range')
+                ## requestion data later than cacheStart
+                #fetchStart = start
+                #isInCache = False
+        #else:
+            #log.debug('start withing cache range')
+            ## start is within cache limits
+            #fetchStart = cacheLow - 1
         return isInCache, fetchStart, fetchEnd
 
 class OdwError(exceptions.Exception):
