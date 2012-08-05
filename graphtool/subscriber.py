@@ -589,7 +589,6 @@ class subscriber(object):
             return chart.getSeriesData()
         def onSeriesSuccess(result, series_id):
             log.debug('sending data to chart object')
-            log.debug(result)
             chart.setSeriesData(series_id, result)
         def onFailure(reason):
             log.error(reason)

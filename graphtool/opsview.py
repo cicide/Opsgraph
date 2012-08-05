@@ -190,17 +190,13 @@ class TimelineCache(object):
         timeValues.sort()
         cacheLow = timeValues[0] - cacheLatency
         cacheHigh = timeValues[len(timeValues)-1] + cacheLatency
-        log.debug('checking cache values')
-        log.debug('requested start: %s' % start)
-        log.debug('cache start: %s' % timeValues[0])
-        log.debug('cache low w/latency: %s' % cacheLow)
-        log.debug('requested end: %s' % end)
-        log.debug('cache end: %s' % timeValues[len(timeValues)-1])
-        log.debug('cache high w/latency: %s' % cacheHigh)
-        #inStart = bisect(timeValues, end)
-        #inEnd = bisect(timeValues, start)
-        #log.debug('inEnd: %s' % inEnd)
-        #log.debug('inStart: %s' % inStart)
+        #log.debug('checking cache values')
+        #log.debug('requested start: %s' % start)
+        #log.debug('cache start: %s' % timeValues[0])
+        #log.debug('cache low w/latency: %s' % cacheLow)
+        #log.debug('requested end: %s' % end)
+        #log.debug('cache end: %s' % timeValues[len(timeValues)-1])
+        #log.debug('cache high w/latency: %s' % cacheHigh)
         if start < cacheLow:
             log.debug('end falls outside of cache')
             # requesting data earlier than cacheStart
@@ -218,30 +214,6 @@ class TimelineCache(object):
         else:
             log.debug('start inside of cache range')
             fetchStart = start
-
-        #if inEnd == 0:
-            #log.debug('end falls outside of cache')
-            ## requesting data earlier than cacheStart
-            #fetchEnd = end
-            #isInCache = False
-        #else:
-            ## end is within cache limits
-            #log.debug('end within cache range')
-            #fetchEnd = cacheHigh + 1
-        #if inStart >= len(timeValues):
-            #if inStart < cacheHigh:
-                #log.debug('start within cache range')
-                ## start is within allowed latency of cache high
-                #fetchStart = cacheLow - 1
-            #else:
-                #log.debug('start outside of cache range')
-                ## requestion data later than cacheStart
-                #fetchStart = start
-                #isInCache = False
-        #else:
-            #log.debug('start withing cache range')
-            ## start is within cache limits
-            #fetchStart = cacheLow - 1
         return isInCache, fetchStart, fetchEnd
 
 class OdwError(exceptions.Exception):
@@ -843,12 +815,8 @@ class Metric(Node):
                 dataSet = resultSet['data']
                 description = resultSet['description']
                 log.debug('description: %s' % description)
-                #dataMin = description['Min']
-                #dataMax = description['Max']
-                #dataAvg = description['Average']
                 dataUom = resultSet['uom']
                 dataLabel = resultSet['label']
-                log.debug(dataSet)
                 self.dataCache.addData(dataLabel, dataUom, dataSet)
                 if returnData:
                     log.debug('returning cached data')

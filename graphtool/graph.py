@@ -477,8 +477,6 @@ class chart(object):
             self.seriesData[key_id] = data
         else:
             self.seriesData = {}
-        log.debug('added data to graph object:')
-        log.debug(data)
         
     def setSeriesUri(self, key_id, data_node, api_uri):
         self.seriesUri[key_id] = [data_node, api_uri]

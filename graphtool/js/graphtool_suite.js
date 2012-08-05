@@ -351,6 +351,12 @@ ViewSuites.ViewSuiteWidget.methods(
         var chart_title = chart_object['title'];
         var series_count = chart_series.length;
         var series_array = [];
+        // setup tooltip
+        var chart_tooltip = {
+            formatter: function() {
+                return '<b>' + Highcharts.dateFormat("%A %b %e %H:%M", this.x) + '<br/>' + Highcharts.numberFormat(this.y) + '</b>';
+            }
+        };
         // convert any plotBands start and end times to integers
         var chart_plotBands = chart_xAxis['plotBands'];
         var plotBands_count = chart_plotBands.length;
@@ -433,6 +439,7 @@ ViewSuites.ViewSuiteWidget.methods(
         high_chart.yAxis = chart_yAxis;
         high_chart.xAxis = chart_xAxis;
         high_chart.title = chart_title;
+        high_chart.tooltip = chart_tooltip;
         high_chart.series = series_array;
         var chart = new Highcharts.Chart(high_chart);
         charts[defChart] = chart;
@@ -499,22 +506,25 @@ ViewSuites.ViewSuiteWidget.methods(
                     $jq('#suiteSortable').removeClass(theOldClass).addClass('suiteSortable5');
                 }
             }
-            var highCharts_count = self.highCharts.length;
-            for (var i=0; i<highCharts_count; i++) {
+            //var highCharts_count = charts.length;
+            //alert('highchart count: '+highCharts_count);
+            //for (var i=0; i<highCharts_count; i++) {
+            for (var chart in charts) {
                 var $jq = jQuery.noConflict();
-                var chart = self.highCharts[i];
-                var div_id = chart.container;
+                //var chart = self.highCharts[i];
+                var theChart = charts[chart];
+                var div_id = theChart.container;
                 var theContainer = div_id.parentNode.parentNode;
-                alert('chart container: '+theContainer);
+                // alert('chart container: '+theContainer);
                 var theHeight = $jq(theContainer).height();
                 var theWidth = $jq(theContainer).width();
                 var width = div_id.offsetWidth;
                 var height = div_id.offsetHeight;
-                alert('setting width and height to: '+ theWidth +' x '+ theHeight);
-                chart.setSize( theWidth, theHeight, false);
+                // alert('setting width and height to: '+ theWidth +' x '+ theHeight);
+                theChart.setSize( theWidth, theHeight, false);
             }
-            return false;
         }
+        return false;
     },
     
     function hideItem(self, item) {

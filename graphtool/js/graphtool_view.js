@@ -29,11 +29,19 @@ ViewGraphs.ViewGraphWidget.methods(
         //var chart_options = chart_object['plotOptions'];
         var chart_series = chart_object['series'];
         var chart_chart = chart_object['chart'];
+        // disable reflow for resize event
+        chart_chart['reflow'] = true;
         var chart_yAxis = chart_object['yAxis'];
         var chart_xAxis = chart_object['xAxis'];
         var chart_title = chart_object['title'];
         var series_count = chart_series.length;
         var series_array = [];
+        // setup tooltip
+        var chart_tooltip = {
+            formatter: function() {
+                return '<b>' + Highcharts.dateFormat("%A %b %e %H:%M", this.x) + '<br/>' + Highcharts.numberFormat(this.y) + '</b>';
+            }
+        };
         // convert any plotBands start and end times to integers
         var chart_plotBands = chart_xAxis['plotBands'];
         var plotBands_count = chart_plotBands.length;
@@ -61,7 +69,7 @@ ViewGraphs.ViewGraphWidget.methods(
         var chart_newChart = new Object();
         render_to = chart_chart['renderTo'];
         var hostCell = document.getElementById(render_to);
-        alert('graph render to is '+render_to);
+        // alert('graph render to is '+render_to);
         chart_type = chart_chart['type'];
         chart_zoomType = chart_chart['zoomType'];
         chart_newChart['renderTo'] = render_to;
@@ -117,9 +125,27 @@ ViewGraphs.ViewGraphWidget.methods(
         high_chart.yAxis = chart_yAxis;
         high_chart.xAxis = chart_xAxis;
         high_chart.title = chart_title;
+        high_chart.tooltip = chart_tooltip;
         high_chart.series = series_array;
         var chart = new Highcharts.Chart(high_chart);
         charts[defChart] = chart;
+        var $jq = jQuery.noConflict();
+        $jq(window).resize(
+            function() {
+                var cellHeight = $jq(document).height();
+                var cellWidth = $jq(document).width();
+                if (cellHeight > 500) {
+                    var newHeight = cellHeight - 50;
+                } else {
+                    var newHeight = cellHeight * 0.9;
+                }
+                chart.setSize(
+                    cellWidth,
+                    newHeight,
+                    false
+                );
+            }
+        );
         hostCell.onresize = function () {self.onHCCellResize(chart, hostCell);};
     },
     

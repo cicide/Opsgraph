@@ -833,8 +833,15 @@ Extern.ExternWidget.methods(
         var chart_yAxis = chart_object['yAxis'];
         var chart_xAxis = chart_object['xAxis'];
         var chart_title = chart_object['title'];
+        //var chart_tooltip = chart_object['tooltip'];
         var series_count = chart_series.length;
         var series_array = [];
+        // setup tooltip
+        var chart_tooltip = {
+            formatter: function() {
+                return '<b>' + Highcharts.dateFormat("%A %b %e %H:%M", this.x) + '<br/>' + Highcharts.numberFormat(this.y) + '</b>';
+            }
+        };
         // convert any plotBands start and end times to integers
         var chart_plotBands = chart_xAxis['plotBands'];
         var plotBands_count = chart_plotBands.length;
@@ -906,6 +913,7 @@ Extern.ExternWidget.methods(
         high_chart.yAxis = chart_yAxis;
         high_chart.xAxis = chart_xAxis;
         high_chart.title = chart_title;
+        high_chart.tooltip = chart_tooltip;
         high_chart.series = series_array;
         var chart = new Highcharts.Chart(high_chart);
         charts[defChart] = chart;
