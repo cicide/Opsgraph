@@ -1177,6 +1177,8 @@ class ExternalElement(athena.LiveElement):
                 self.callRemote('addSelect', node_list, rowId, selectId, def_option)
                 if prev_node:
                     self.getOptions('host_options', option_filter=prev_node)
+                if len(nodes) == 1:
+                    self.setItem('node', nodes[0])
         elif optionListId == 'host_options':
             node = option_filter
             node_host_list = self.subscriber.getHostList(node, self.chart)
