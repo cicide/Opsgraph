@@ -304,7 +304,6 @@ class subscriber(object):
         def onLogin(result, auth_node):
             if result:
                 log.debug('Got login result for user login: %s' % self.username)
-                log.debug(result)
                 token, cred_time, cj = result
                 self.auth_node_list[auth_node] = [token, cred_time]
                 log.debug('cred_time: %i, now: %i' % (cred_time, int(time.time())))
@@ -489,7 +488,6 @@ class subscriber(object):
                 event_nodes.append(data_node)
                 n_events = opsview.node_list[data_node].getEvents()
                 log.debug('got events from node %s ' % data_node)
-                log.debug(n_events)
                 for event_type in n_events.keys():
                     if event_type in chart.getChartEventsDisplayList():
                         event_alpha = n_events[event_type]['alpha']
@@ -558,7 +556,6 @@ class subscriber(object):
     def buildMultiSeriesTimeObject(self, chart, chart_cell, data={}):
         if data:
             time_values, data_series = chart.getTimeValues(data)
-            log.debug(data_series)
             if chart.getEventsDisplay() != 'None':
                 events = self.getEventList(time_values, chart)
                 log.debug('got events: %s' % events)
@@ -568,12 +565,10 @@ class subscriber(object):
             if chart.getChartEngine() == 'FusionCharts':
                 #log.debug('building a fusion charts graph from %s' % data)
                 chart_object = chart.buildMultiSeriesTimeObject(time_values, data_series, events)
-                log.debug(chart_object)
                 return chart_object
             elif chart.getChartEngine() == 'HighCharts':
                 #log.debug('building a high charts graph from %s' % data)
                 chart_object = chart.buildHighChartsTimeObject(chart_cell, data_series, events)
-                log.debug(chart_object)
                 return chart_object
         else:
             return {}
@@ -609,9 +604,14 @@ class subscriber(object):
         return d
 
     def _fetchMetricData(self, chart, row, returnData=True, end_time=None, extendCache=False, skipODW=False):
+        data_node, host, service, metric = chart.getSeriesTracker(row)
+        if data_node not in self.auth_node_list:
+            log.debug('Requested data node is not in our authed node list - attempting re-auth')
+            d = self.authenticateNode(data_node)
+            d.addCallback(self._fetchMetricData, chart, row, returnData, end_time, extendCache, skipODW).addErrback(onErr)
+            return d
         log.debug('trying to grab four items from %s' % chart.getSeriesTracker(row))
         log.debug('subscribers auth_list is %s' % self.auth_node_list)
-        data_node, host, service, metric = chart.getSeriesTracker(row)
         try:
             cred_token, cred_time = self.auth_node_list[data_node]
         except:
@@ -831,7 +831,6 @@ class subscriber(object):
     @_setTouchTime_decorator
     def getSavedGraphList(self):
         def onSuccess(result):
-            log.debug(result)
             graph_list = []
             for row in result:
                 tmp = []
@@ -850,8 +849,7 @@ class subscriber(object):
     @_setTouchTime_decorator
     def loadGraph(self, dbId):
         def onCompleteSuccess(result):
-            log.debug('graph completely loaded!')
-            log.debug(result)
+            log.debug('graph completely loaded')
             log.debug('Final result is %s' % finalResult)
             if finalResult:
                 return chart

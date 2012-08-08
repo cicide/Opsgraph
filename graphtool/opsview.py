@@ -178,7 +178,6 @@ class TimelineCache(object):
             returnSet['cacheData'] = returnData
             returnSet['label'] = self.label
             returnSet['uom'] = self.uom
-            log.debug(returnSet)
             return {'list': [returnSet]}
             
     def isCached(self, start, end):
@@ -300,7 +299,6 @@ class Domain(Node):
     def loadEvents(self):
         def onTypeSuccess(result):
             log.debug('Got Event Types result for Node %s: ' % self.name)
-            log.debug(result)
             self.event_type_list = []
             if result and type(result) != type(bool()):            
                 for item in result:
@@ -312,7 +310,6 @@ class Domain(Node):
   
         def onEventsSuccess(result):
             log.debug('Got Event List result for Node %s: ' % self.name)
-            log.debug(result)
             event_list = {}
             if result:
                 for event in result:
