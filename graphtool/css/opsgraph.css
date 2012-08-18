@@ -94,3 +94,6 @@ ul.menu_tabbed li a.selected {
     border-bottom: 1px #FFFFFF solid;
     padding: 9px 9px 5px 9px;
     }
+    
+/* Enable shade on hover for table rows with seriesId data */
+tr:hover[id^="seriesId"] {background-color:yellow;}
