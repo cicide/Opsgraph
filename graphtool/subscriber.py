@@ -48,14 +48,15 @@ graph_types['HighCharts'] = {'Line': 'line',
                              'Column': 'column',
                              'Bar': 'bar',
                             }
-graph_size = {}
-graph_size['Small'] = ('600','400')
-graph_size['Medium'] = ('800','600')
-graph_size['Large'] = ('1000','800')
-graph_size['Huge'] = ('1200','1000')
+#graph_size = {}
+#graph_size['Small'] = ('600','400')
+#graph_size['Medium'] = ('800','600')
+#graph_size['Large'] = ('1000','800')
+#graph_size['Huge'] = ('1200','1000')
 graph_privacy = {}
 graph_privacy['Public'] = 0
 graph_privacy['Private'] = 2
+cfg_sections = utils.config.sections()
 
 subscribers = {}
 
@@ -612,7 +613,7 @@ class subscriber(object):
         if data_node not in self.auth_node_list:
             log.debug('Requested data node is not in our authed node list - attempting re-auth')
             d = self.authenticateNode(data_node)
-            d.addCallback(self._reFetchMetricData, chart, row, returnData=returnData, end_time=end_time, extendCache=extendCache, skipODW=skipODW).addErrback(onErr)
+            d.addCallback(self._reFetchMetricData, chart, row, returnData=returnData, end_time=end_time, extendCache=extendCache, skipODW=skipODW).addErrback(self.onFailure)
             return d
         log.debug('trying to grab four items from %s' % chart.getSeriesTracker(row))
         log.debug('subscribers auth_list is %s' % self.auth_node_list)
@@ -915,5 +916,12 @@ def addSubscriber(username, password):
         subscribers[username] = subscriber(username, password)
     return subscribers[username]
         
-        
-        
+# Load the defined graph sizes from the config file
+
+graph_size = {}
+for section in cfg_sections:
+    if section[:10] == 'graphsize_':
+        size_name = str(utils.config.get(section, "name"))
+        size_width = str(utils.config.get(section, "width"))
+        size_height = str(utils.config.get(section, "height"))
+        graph_size[size_name] = (size_width,size_height)
