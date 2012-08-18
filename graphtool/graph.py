@@ -204,12 +204,15 @@ class suite(object):
         if self.start == 'Now':
             suite_def['start'] = 0
         else:
-            suite_def['start'] = suite.start
+            suite_def['start'] = self.start
         suite_def['numCols'] = int(self.columns)
         # if we already have a dbId, we should do an update instead of an insert
         if self.dbId:
             # do a suite update here instead of a save
-            d = txdbinterface.updateSuite(suite_def, self.member_list)
+            #d = txdbinterface.updateSuite(suite_def, self.member_list)
+            # TODO - FIX THIS - for now let's just save a copy
+            log.error('We are saving a copy when we should be updating - FIX THIS')
+            d = txdbinterface.saveSuite(suite_def, self.member_list)
         else:
             d = txdbinterface.saveSuite(suite_def, self.member_list)
         d.addCallbacks(onSaveComplete,onFailure)
@@ -262,6 +265,7 @@ class suite(object):
     
     def setChartStart(self, start):
         self.start = start
+        log.debug('suite start set to %s' % self.start)
         self.noteChanges('start', start)
         
     def getChartStart(self):
@@ -336,7 +340,7 @@ class chart(object):
             self.engine = 'HighCharts'
             self.ctype = 'Line'
             self.dbId = None
-            self.size = 'Large'
+            self.size = 'Default'
             self.width = '800'
             self.height = '600'
             self.durLen = def_dur_len

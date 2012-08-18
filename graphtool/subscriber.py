@@ -802,6 +802,7 @@ class subscriber(object):
                 hour,minute = ttime.split(':')
                 start_time_object = datetime.datetime(int(year), int(month), int(day), int(hour), int(minute))
                 start_time = time.mktime(start_time_object.timetuple())
+            log.debug('sending start time %s to chart/suite' %  start_time)
             chart.setChartStart(start_time)
         return True
     
