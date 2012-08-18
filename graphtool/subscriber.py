@@ -603,12 +603,16 @@ class subscriber(object):
         d.addCallbacks(onTotalSuccess, onFailure)
         return d
 
+    def _reFetchMetricData(self, result, chart, row, returnData, end_time, extendCache, skipODW):
+        """ called from _fetchMetricData when a node re-auth is required """
+        return self._fetchMetricData(chart, row, returnData=returnData, end_time=end_time, extendCache=extendCache, skipODW=skipODW)
+
     def _fetchMetricData(self, chart, row, returnData=True, end_time=None, extendCache=False, skipODW=False):
         data_node, host, service, metric = chart.getSeriesTracker(row)
         if data_node not in self.auth_node_list:
             log.debug('Requested data node is not in our authed node list - attempting re-auth')
             d = self.authenticateNode(data_node)
-            d.addCallback(self._fetchMetricData, chart, row, returnData, end_time, extendCache, skipODW).addErrback(onErr)
+            d.addCallback(self._reFetchMetricData, chart, row, returnData=returnData, end_time=end_time, extendCache=extendCache, skipODW=skipODW).addErrback(onErr)
             return d
         log.debug('trying to grab four items from %s' % chart.getSeriesTracker(row))
         log.debug('subscribers auth_list is %s' % self.auth_node_list)
