@@ -75,6 +75,7 @@ class subscriber(object):
         self.chartList = []
         self.livePageList = []
         self.liveCharts = {}
+        self.reauth_node_set = set([])
         self._touchTime = int(time.time())
         self.timeoutChecker = LoopingCall(self._checkTimeout)
         self.timeoutChecker.start(5)
@@ -326,6 +327,8 @@ class subscriber(object):
             if int(time.time()) - int(old_cred_time) < 60:
                 log.debug('re-auth attempted too soon, last auth: %i' % old_cred_time)
                 login_result = False
+                return login_result
+                #return defer.succeed(True)
             else:
                 log.debug('attempting re-auth')
                 login_result = opsview.node_list[auth_node].loginUser(self.username, self.password)
@@ -573,6 +576,174 @@ class subscriber(object):
         else:
             return {}
 
+    def checkNodes(self, chart):
+        ''' Validate all nodes required by all the graphs are healthy '''
+        log.debug("subscriber:checkNodes: called")
+
+        def onNodeReauthSuccess(result, node_name):
+            ''' REauth succeeded '''
+            log.debug("subscriber:checkNodes:onNodeReauthSuccess for %s result=%s"%(node_name,result))
+            if node_name in self.reauth_node_defers_dict:
+                defers_list = self.reauth_node_defers_dict[node_name]
+                # fire all deferreds for this node
+                for d in defers_list:
+                    d.callback(result)
+            else:
+                log.debug("subscriber:checkNodes:onNodeReauthSuccess for %s . Strangely no deferreds waiting on this node!"%(node_name))
+            # Finished processing reauth for this node, remove from reauth node set
+            log.debug("subscriber:onNodeReauthSuccess set=%s"%self.reauth_node_set)
+            log.debug("subscriber:checkNodes:onNodeReauthSuccess dict = %s"%self.reauth_node_defers_dict)
+            if node_name in self.reauth_node_set:
+                self.reauth_node_set.remove(node_name)
+            if node_name in self.reauth_node_defers_dict:
+                del(self.reauth_node_defers_dict[node_name])
+            log.debug("subscriber:checkNodes:onNodeReauthSuccess set after delete = %s"%self.reauth_node_set)
+            log.debug("subscriber:checkNodes:onNodeReauthSuccess dict after delete = %s"%self.reauth_node_defers_dict)
+            return None
+
+        def onNodeReauthFail(failure, node_name):
+            ''' REauth failed '''
+            log.debug("subscriber:checkNodes:onNodeReauthFail for %s result=%s"%(node_name,failure))
+            if node_name in self.reauth_node_defers_dict:
+                defers_list = self.reauth_node_defers_dict[node_name]
+                # fire all deferreds for this node
+                for d in defers_list:
+                    d.errback(failure)
+            else:
+                log.debug("subscriber:checkNodes:onNodeReauthFail for %s . Strangely no deferreds waiting on this node!"%(node_name))
+            return None
+
+        self.reauth_node_set = set([])
+        self.reauth_node_defers_dict = {} #{"kixeye":[d1,d2], "netgeeks":[d1,d2,d3]}
+        for row in chart.getSeries():
+            data_node, host, service, metric = chart.getSeriesTracker(row)
+            log.debug("subscriber:checkNodes: Processing %s"%data_node)
+            if data_node not in self.reauth_node_set:
+                log.debug("subscriber:checkNodes: Not in reauth_node_set %s"%data_node)
+                # Fresh node needs reauth
+                d = self.authenticateNode(data_node)
+                if type(d) == type(bool()):
+                    log.debug("subscriber:checkNodes: No need to reauth at all for %s"%data_node)
+                    continue
+                d.addCallback(onNodeReauthSuccess, data_node)
+                d.addErrback(onNodeReauthFail, data_node)
+                '''
+                # put deferred in deferreds storage
+                if data_node in reauth_node_defers_dict:
+                    reauth_node_defers_dict[data_node].append(d)
+                else:
+                    # very first one
+                    reauth_node_defers_dict[data_node] = [d]
+                '''
+                # indicate that this node is already in queue for re-auth
+                self.reauth_node_set.add(data_node)
+            else:
+                log.debug("subscriber:checkNodes: Already in reauth_node_set %s"%data_node)
+
+            log.debug("subscriber:checkNodes loop set=%s"%self.reauth_node_set)
+
+            d_dummy = defer.Deferred() # just a dummy deferred to hold on to
+            # put deferred in deferreds storage
+            if data_node in self.reauth_node_defers_dict:
+                self.reauth_node_defers_dict[data_node].append(d_dummy)
+            else:
+                self.reauth_node_defers_dict[data_node] = [d_dummy]
+            
+            log.debug("subscriber:checkNodes loop reauth_node_defers_dict=%s"%self.reauth_node_defers_dict)
+
+        # prepare the final list of defers for all reauths
+        reauth_node_defers_list = []
+        for key, value in self.reauth_node_defers_dict.iteritems():
+            reauth_node_defers_list.extend(value)
+        log.debug("subscriber:checkNodes:Final list of deferreds = %s"%reauth_node_defers_list)
+        dlist = defer.DeferredList(reauth_node_defers_list, consumeErrors=True)
+        return dlist
+         
+
+    @_setTouchTime_decorator
+    def makeGraph(self, chart, returnData=True, end_time=None, extendCache=False, skipODW=False):
+
+        ######### DEBUG SIMULATE #########
+        #self.auth_node_list = {}
+        ######### DEBUG SIMULATE #########
+        log.debug('subscriber:makeGraph called - subscribers auth_list is %s' % self.auth_node_list)
+
+
+        def onReAuthSuccess(result, chart, returnData=returnData, end_time=end_time, extendCache=extendCache, skipODW=skipODW):
+            log.debug("subscriber:makeGraph: onReAuthSuccess reuslt=%s"%result)
+            log.debug('graphing the following series: %s' % chart.getSeries())
+            ds = []
+            for row in chart.getSeries():
+                result = self._fetchMetricData(chart, row, returnData, end_time, extendCache, skipODW)
+                if result:
+                    result.addCallback(onSeriesSuccess, row)
+                    ds.append(result)
+                else:
+                    log.debug('oops, somehow our fetchMetricData request failed for row -'%row)
+            d = defer.DeferredList(ds, consumeErrors=False)
+            d.addCallbacks(onTotalSuccess, onTotalFailure)
+            return d
+
+        def onReAuthFail(failure, chart, returnData=returnData, end_time=end_time, extendCache=extendCache, skipODW=skipODW):
+            log.debug("subscriber:makeGraph: onReAuthFail failure=%s"%failure)
+       
+        def onSeriesSuccess(result, series_id):
+            log.debug('subscriber:makeGraph:onSeriesSuccess:sending data to chart object series_id=%s'%(series_id))
+            chart.setSeriesData(series_id, result)
+
+        def onTotalSuccess(result):
+            log.debug('subscriber:makeGraph:onTotalSuccess: got all results!')
+            return chart.getSeriesData()
+
+        def onTotalFailure(reason):
+            log.error("subscriber:makeGraph:onTotalFailure: reason=%s"%reason)
+            return False
+
+        # First check the nodes are fine
+        chart.setSeriesData()
+        chart.setDataNodes([])
+        d = self.checkNodes(chart)
+        d.addCallback(onReAuthSuccess, chart, returnData, end_time, extendCache, skipODW)
+        d.addErrback(onReAuthFail, chart, returnData, end_time, extendCache, skipODW)
+
+        return d
+
+    def _fetchMetricData(self, chart, row, returnData=True, end_time=None, extendCache=False, skipODW=False):
+        log.debug("subscriber:_fetchMetricData called")
+        data_node, host, service, metric = chart.getSeriesTracker(row)
+
+        log.debug('trying to grab four items from %s' % chart.getSeriesTracker(row))
+
+        if data_node not in chart.getDataNodes():
+            chart.addDataNode(data_node)
+
+        creds = {'X-Opsview-Username': self.username, 'X-Opsview-Token': self.auth_node_list[data_node][0]}
+        cookies = {'auth_tkt': self.auth_tkt}
+        api_uri = '%s::%s::%s' % (host, service, metric)
+        chart.setSeriesUri(row, data_node, api_uri)
+        if not extendCache:
+            log.debug('calculating end time')
+            end_time,duration = chart.calculateGraphPeriod()
+            durSet = (chart.getChartDurationModifier(), chart.getChartDurationLength(), chart.getChartDurationUnit())
+            endTime = startTime = None
+        elif end_time:
+            startTime = opsview.node_list[data_node].getMaxCacheTimeValue(host, service, metric) + 1
+            endTime = end_time
+            durSet = None
+            log.debug('end time provided by calling party')
+        else:
+            startTime = opsview.node_list[data_node].getMaxCacheTimeValue(host, service, metric) + 1
+            end_time = endTime = int(time.time())
+            durSet = None
+            log.debug('end set to now, no need to calculate')
+        log.debug('end time: %s' % end_time )
+        log.debug('startTime: %s' % startTime)
+        log.debug('endTime: %s' % endTime)
+        #result = opsview.node_list[data_node].fetchData(api_uri, end_time, duration, creds, cookies, (host, service, metric))
+        result = defer.maybeDeferred(opsview.node_list[data_node].fetchData, api_uri, end_time, creds=creds, cookies=cookies, hsm=(host, service, metric), durSet=durSet, endTime=endTime, startTime=startTime, returnData=returnData, skipODW=skipODW)
+        return result
+
+    '''
     def _makeGraph(self, result, chart, returnData, end_time, extendCache, skipODW):
         """ called from makeGraph when authentication has failed during a graph build"""
         return self.makeGraph(chart, returnData, end_time, extendCache, skipODW)
@@ -604,7 +775,7 @@ class subscriber(object):
         return d
 
     def _reFetchMetricData(self, result, chart, row, returnData, end_time, extendCache, skipODW):
-        """ called from _fetchMetricData when a node re-auth is required """
+        # called from _fetchMetricData when a node re-auth is required
         return self._fetchMetricData(chart, row, returnData=returnData, end_time=end_time, extendCache=extendCache, skipODW=skipODW)
 
     def _fetchMetricData(self, chart, row, returnData=True, end_time=None, extendCache=False, skipODW=False):
@@ -654,6 +825,7 @@ class subscriber(object):
         #result = opsview.node_list[data_node].fetchData(api_uri, end_time, duration, creds, cookies, (host, service, metric))
         result = defer.maybeDeferred(opsview.node_list[data_node].fetchData, api_uri, end_time, creds=creds, cookies=cookies, hsm=(host, service, metric), durSet=durSet, endTime=endTime, startTime=startTime, returnData=returnData, skipODW=skipODW)
         return result
+    '''
 
     @_setTouchTime_decorator
     def saveGraph(self, chart):

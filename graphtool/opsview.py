@@ -377,7 +377,23 @@ class Domain(Node):
         return d
         
     def onErr(self, reason):
+        log.debug("opsview: onErr() called")
         log.error(reason)
+        if reason and type(reason) != type(bool()):
+            de = reason.trap(defer.CancelledError)
+            if de == defer.CancelledError:
+                log.debug("Cancelled request error. Need to schedule rescan")
+                if self.rescan_sched:
+                    if (self.rescan_sched - int(time.time())) > 120:
+                        log.debug('cancelled error, scheduling a rescan for in one minute')
+                        reactor.callLater(60, self.initialize)
+                        self.rescan_sched = int(time.time()) + 60
+                    else:
+                        log.debug('cancelled error, rescan already scheduled within the next two minutes')
+                else:
+                    log.debug('cancelled error, scheduling a Fresh rescan for in one minute')
+                    reactor.callLater(60, self.initialize)
+                    self.rescan_sched = int(time.time()) + 60
         
     def onInitErr(self, reason):
         log.error(reason)
