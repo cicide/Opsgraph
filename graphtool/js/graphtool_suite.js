@@ -354,7 +354,7 @@ ViewSuites.ViewSuiteWidget.methods(
         // setup tooltip
         var chart_tooltip = {
             formatter: function() {
-                return '<b>' + this.series.name + '<br/> +'Highcharts.dateFormat("%A %b %e %H:%M", this.x) + '<br/>' + this.y + '</b>';
+                return '<b>' + this.series.name + '<br/>' + Highcharts.dateFormat("%A %b %e %H:%M", this.x) + '<br/>' + this.y + '</b>';
             }
         };
         // convert any plotBands start and end times to integers
