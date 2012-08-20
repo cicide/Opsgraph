@@ -27,12 +27,14 @@ def getLineChartObject(date_format, graph_settings, data_series, caption, x_axis
     uoms = []
     for series in data_series:
         series_name = str(series['label'])
+        series_id = str(series['seriesId'])
         data_dict = series['data']
         series_uom = str(series['uom'])
         if series_uom not in uoms:
             uoms.append(series_uom)
         series_item = {}
         series_item[u'name'] = unicode(series_name)
+        series_item[u'seriesId'] = unicode(series_id)
         series_data = []
         time_values = data_dict.keys()
         time_values.sort()
@@ -59,6 +61,7 @@ def getLineChartObject(date_format, graph_settings, data_series, caption, x_axis
             tmp[unicode('alpha')] = record['alpha']
             plotBands.append(tmp)
     plotOptions = []
+    tooltip = { u'xDateFormat': u'%Y-%m-%d %H:%M'}
     yAxis = { u'title': {u'text': unicode(uom)},
               u'min': 0
             }
@@ -76,6 +79,7 @@ def getLineChartObject(date_format, graph_settings, data_series, caption, x_axis
                      u'title': title,
                      u'xAxis': xAxis,
                      u'yAxis': yAxis,
+                     u'tooltip': tooltip,
                      u'series': series_object}
     #log.debug(chart_object)
     return chart_object

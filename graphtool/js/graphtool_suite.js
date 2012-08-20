@@ -4,6 +4,8 @@ ViewSuites = {};
 
 ViewSuites.ViewSuiteWidget = Nevow.Athena.Widget.subclass('ViewSuites.ViewSuiteWidget');
 
+var charts = {}  //global chart tracker
+
 ViewSuites.ViewSuiteWidget.methods(
 
     function __init__(self, node) {
@@ -338,7 +340,7 @@ ViewSuites.ViewSuiteWidget.methods(
         newChart.render(div_id);
     },
     
-    function addHighChart(self, chart_object, list_id) {
+    function addHighChart(self, chart_object, list_id, defChart) {
         var theListElement = document.getElementById(list_id);
         var high_chart = new Object();
         //var chart_options = chart_object['plotOptions'];
@@ -349,6 +351,12 @@ ViewSuites.ViewSuiteWidget.methods(
         var chart_title = chart_object['title'];
         var series_count = chart_series.length;
         var series_array = [];
+        // setup tooltip
+        var chart_tooltip = {
+            formatter: function() {
+                return '<b>' + this.series.name + '<br/>' + Highcharts.dateFormat("%A %b %e %H:%M", this.x) + '<br/>' + this.y + '</b>';
+            }
+        };
         // convert any plotBands start and end times to integers
         var chart_plotBands = chart_xAxis['plotBands'];
         var plotBands_count = chart_plotBands.length;
@@ -384,6 +392,7 @@ ViewSuites.ViewSuiteWidget.methods(
         // convert the unicodeized strings to ints and floats for series
         for (var i=0; i<series_count; i++) {
             var series_name = chart_series[i]['name'];
+            var series_id = chart_series[i]['seriesId'];
             var series_data = chart_series[i]['data'];
             var series_data_count = series_data.length;
             var series_fmt_data = [];
@@ -395,6 +404,7 @@ ViewSuites.ViewSuiteWidget.methods(
             }
             var fmt_series = new Object();
             fmt_series.name = series_name;
+            fmt_series.id = series_id;
             fmt_series.data = series_fmt_data;
             series_array.push(fmt_series);
         }
@@ -429,10 +439,24 @@ ViewSuites.ViewSuiteWidget.methods(
         high_chart.yAxis = chart_yAxis;
         high_chart.xAxis = chart_xAxis;
         high_chart.title = chart_title;
+        high_chart.tooltip = chart_tooltip;
         high_chart.series = series_array;
         var chart = new Highcharts.Chart(high_chart);
+        charts[defChart] = chart;
         theListElement.onresize = function () {self.onChartResize(theListElement, chart);};
         self.highCharts.push(chart);
+    },
+    
+    function addPoint(self, chartId, seriesId, dataPoint) {
+        var theChart = charts[chartId];
+        var theSeries = theChart.get(seriesId);
+        var x_data = dataPoint[0];
+        var y_data = dataPoint[1];
+        var x_val = parseInt(x_data)*1000;
+        var y_val = parseFloat(y_data);
+        var x_y = [x_val, y_val];
+        theSeries.addPoint(x_y, true, true);
+        return false;
     },
     
     function onChangeText(self, theText) {
@@ -482,22 +506,25 @@ ViewSuites.ViewSuiteWidget.methods(
                     $jq('#suiteSortable').removeClass(theOldClass).addClass('suiteSortable5');
                 }
             }
-            var highCharts_count = self.highCharts.length;
-            for (var i=0; i<highCharts_count; i++) {
+            //var highCharts_count = charts.length;
+            //alert('highchart count: '+highCharts_count);
+            //for (var i=0; i<highCharts_count; i++) {
+            for (var chart in charts) {
                 var $jq = jQuery.noConflict();
-                var chart = self.highCharts[i];
-                var div_id = chart.container;
+                //var chart = self.highCharts[i];
+                var theChart = charts[chart];
+                var div_id = theChart.container;
                 var theContainer = div_id.parentNode.parentNode;
-                alert('chart container: '+theContainer);
+                // alert('chart container: '+theContainer);
                 var theHeight = $jq(theContainer).height();
                 var theWidth = $jq(theContainer).width();
                 var width = div_id.offsetWidth;
                 var height = div_id.offsetHeight;
-                alert('setting width and height to: '+ theWidth +' x '+ theHeight);
-                chart.setSize( theWidth, theHeight, false);
+                // alert('setting width and height to: '+ theWidth +' x '+ theHeight);
+                theChart.setSize( theWidth, theHeight, false);
             }
-            return false;
         }
+        return false;
     },
     
     function hideItem(self, item) {

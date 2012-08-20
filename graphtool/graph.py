@@ -4,6 +4,8 @@ import time, datetime
 import utils, fusioncharts, highcharts, txdbinterface
 from itertools import chain
 from twisted.internet import defer
+from twisted.internet.task import LoopingCall
+
 
 log = utils.get_logger("GraphService")
 
@@ -202,12 +204,15 @@ class suite(object):
         if self.start == 'Now':
             suite_def['start'] = 0
         else:
-            suite_def['start'] = suite.start
+            suite_def['start'] = self.start
         suite_def['numCols'] = int(self.columns)
         # if we already have a dbId, we should do an update instead of an insert
         if self.dbId:
             # do a suite update here instead of a save
-            d = txdbinterface.updateSuite(suite_def, self.member_list)
+            #d = txdbinterface.updateSuite(suite_def, self.member_list)
+            # TODO - FIX THIS - for now let's just save a copy
+            log.error('We are saving a copy when we should be updating - FIX THIS')
+            d = txdbinterface.saveSuite(suite_def, self.member_list)
         else:
             d = txdbinterface.saveSuite(suite_def, self.member_list)
         d.addCallbacks(onSaveComplete,onFailure)
@@ -260,6 +265,7 @@ class suite(object):
     
     def setChartStart(self, start):
         self.start = start
+        log.debug('suite start set to %s' % self.start)
         self.noteChanges('start', start)
         
     def getChartStart(self):
@@ -325,14 +331,16 @@ class chart(object):
             self.selected_service = copy_master.selected_service
             self.selected_metric = copy_master.selected_metric
             self.previousSeries = copy_master.previousSeries
+            self.liveElements = copy_master.liveElements
+            self.liveUpdater = copy_master.liveUpdater
         else:
             self.name = 'Default Graph Name'
-            self.title = 'Default.Graph Title'
+            self.title = 'Default Graph Title'
             self.privacy = 'Public' # Public, ACL, Private
-            self.engine = 'FusionCharts'
-            self.ctype = 'Zoom Chart'
+            self.engine = 'HighCharts'
+            self.ctype = 'Line'
             self.dbId = None
-            self.size = 'Large'
+            self.size = 'Default'
             self.width = '800'
             self.height = '600'
             self.durLen = def_dur_len
@@ -365,6 +373,78 @@ class chart(object):
             self.selected_service = None
             self.selected_metric = None
             self.previousSeries = None
+            self.liveElements = {}
+            self.liveUpdater = None
+        
+    def addLiveElement(self, element, chartId):
+        if element not in self.liveElements:
+            log.debug('adding a live element to my list to be updated')
+            self.liveElements[element] = [chartId]
+        else:
+            if chartId not in self.liveElements[element]:
+                log.debug('adding chartId %s to live element with %i chart ids' % (chartId, len(self.liveElements[element])))
+                self.liveElements[element].append(chartId)
+            else:
+                log.debug('chartId %s is already being live updated for this element' % chartId)
+        if self.start == 'Now':
+            log.debug('enable live updates for chart')
+            self.liveUpdate(True, 150)
+        elif (time.time() - self.start) < 301:
+            log.debug('enable live updates for chart with start time within five minutes')
+            self.liveUpdate(True, 150)
+        else:
+            log.debug('graph end time is too old to be made live')
+            
+    def cancelLiveElement(self, element):
+        if element in self.liveElements:
+            log.debug('removing live element from chart')
+            tmp = self.liveElements.pop(element)
+            tmp = None
+        else:
+            log.debug('got a live element removal request for an element that was not live')
+        if not len(self.liveElements):
+            self.liveUpdate(False)
+            
+    def liveUpdate(self, active, interval=300):
+        # enable or disable liveUpdates - looping call
+        log.debug('liveUpdate request: %s, interval: %s' % (active, interval))
+        if active:
+            self.liveUpdater = LoopingCall(self.runLiveUpdates)
+            self.liveUpdater.start(interval)
+        else:
+            if self.liveUpdater:
+                if self.liveUpdater.running:
+                    log.debug('Stopping live updates')
+                    self.liveUpdater.stop()
+                    self.liveUpdater = None
+
+    def runLiveUpdates(self):
+        def onSuccess(result, seriesId):
+            log.debug(result)
+            cacheData = result['list'][0]['cacheData']
+            if len(cacheData):
+                self.updateLiveElements(cacheData, seriesId)
+        def onFailure(reason):
+            log.error(reason)
+        self.owner._touchTime = int(time.time())
+        log.debug('running Live update for %s' % self.name)
+        # Check for new data
+        for row in self.getSeries():
+            result = self.owner._fetchMetricData(self, row, returnData=True, end_time=int(time.time()), extendCache=True, skipODW=True)
+            result.addCallback(onSuccess, row).addErrback(onFailure)
+
+    def updateLiveElements(self, liveData, seriesId):
+        if len(self.liveElements):
+            # send the update to each element viewing this graph
+            for element in self.liveElements:
+                #we will need to pass the graph element id, as well as the series being updated with the
+                #actual live data 
+                log.debug(self.liveElements[element])
+                for chartId in self.liveElements[element]:
+                    element.liveUpdate(chartId, seriesId, liveData)
+        else:
+            log.debug('got a liveUpdate for a graph with no listeners')
+            self.liveUpdate(False)
         
     def getDataNodes(self):
         return self.dataNodes
@@ -619,7 +699,7 @@ class chart(object):
             data_series = []
             data_record_dict = {}
             log.debug('received data for graph object creation')
-            #log.debug(data)
+            log.debug(data)
             for series in data:
                 log.debug('Working on series: %s' % series)
                 # to-do: Handle Series with value None
@@ -666,6 +746,7 @@ class chart(object):
                         log.debug('unknown series data type')
                     #log.debug(data_dict)
                     series_list['data'] = data_dict
+                    series_list['seriesId'] = series
                 else:
                     series_list['data'] = {}
                 data_series.append(series_list)
@@ -732,7 +813,7 @@ class chart(object):
             # We will need to package up the series data into dictionaries with time: value format
             data_series = self.normalizeData(data)
             # We should now have a list with a dictionary for each series
-            # The dictionary should have the keys data, description, uom, and label
+            # The dictionary should have the keys data, description, uom, id, and label
             # inside the data item, we have a list of [time, value] lists
             # We need to build a list of all the time values in order, as the 
             #   different series might not have data for the same time values
@@ -747,7 +828,7 @@ class chart(object):
             for series in data_series:
                 tvList.append(series['data'].keys())
             # chain the lists of series x values into a single list
-            # set gives us in unordered set of objects, removing duplicates
+            # set gives us an unordered set of objects, removing duplicates
             # convert it back to a list for our use
             time_values = list(iter(set(chain(*tvList))))
             if not len(time_values):
