@@ -21,7 +21,8 @@ timeRoundBase = int(utils.config.get('graph', 'round_time'))
 
 node_list = {}
 event_type_list = ['outage', 'event']
-loginTimeout = 10
+loginTimeout = 10  # how long should we wait for a login attempt to succeed
+maxLoginTimeout = 300 # what is the absolutely longest period we should wait?
 dataTimeout = 20
 cacheDict = {} # dictionary of cache objects name: object
 cacheLife = 28800 # dump any cache that hasn't been used in 8 hours
@@ -376,26 +377,39 @@ class Domain(Node):
         d.addCallback(onSuccess, domain).addErrback(onFailure)
         return d
         
-    def onErr(self, reason):
+    def onErr(self, reason, timeout=None):
         log.debug("opsview: onErr() called")
         log.error(reason)
         if reason and type(reason) != type(bool()):
             de = reason.trap(defer.CancelledError)
             if de == defer.CancelledError:
                 log.debug("Cancelled request error. Need to schedule rescan")
-                if self.rescan_sched:
-                    if (self.rescan_sched - int(time.time())) > 120:
-                        log.debug('cancelled error, scheduling a rescan for in one minute')
-                        reactor.callLater(60, self.initialize)
-                        self.rescan_sched = int(time.time()) + 60
-                    else:
-                        log.debug('cancelled error, rescan already scheduled within the next two minutes')
+                if not timeout:
+                    newTimeout = loginTimeout
+                    scan_retry = 60
+                    scan_check = scan_retry * 2
+                    log.debug("no data on timeout attempted received, using default of %s" % loginTimeout)
                 else:
-                    log.debug('cancelled error, scheduling a Fresh rescan for in one minute')
-                    reactor.callLater(60, self.initialize)
-                    self.rescan_sched = int(time.time()) + 60
+                    newTimeout = timeout
+                    if newTimeout > 60:
+                        scan_retry = 60
+                    else:
+                        scan_retry = timeout
+                    scan_check = scan_retry * 2
+                    log.debug("retrying initialize after failure with %s timeout" % newTimeout)
+                if self.rescan_sched:
+                    if (self.rescan_sched - int(time.time())) > scan_check:
+                        log.debug('cancelled error, scheduling a rescan in %i seconds' % scan_retry)
+                        reactor.callLater(scan_retry, self.initialize, None, newTimeout)
+                        self.rescan_sched = int(time.time()) + scan_retry
+                    else:
+                        log.debug('cancelled error, rescan already scheduled within the next %i seconds' % scan_check)
+                else:
+                    log.debug('cancelled error, scheduling a Fresh rescan for in %i seconds' % scan_retry)
+                    reactor.callLater(scan_retry, self.initialize, None, newTimeout)
+                    self.rescan_sched = int(time.time()) + scan_retry
         
-    def onInitErr(self, reason):
+    def onInitErr(self, reason, attemptedTimeout=None):
         log.error(reason)
         if reason.getErrorMessage() == '401 Unauthorized':
             # Re login to opsview server
@@ -405,6 +419,11 @@ class Domain(Node):
             reactor.callLater(10, self.initialize)
             self.rescan_sched = int(time.time()) + 10
             #return False
+        else:
+            #log.debug('Node INIT Error Reason: %s') % reason.getErrorMessage()
+            reactor.callLater(3, self.initialize, None, attemptedTimeout)
+            log.debug('OnInitErr: Scheduling a rescan for three seconds')
+            self.rescan_sched = int(time.time()) + 3
 
     def setVersions(self, easyxdm, api_min, api):
         self.easyxdm_version = easyxdm
@@ -475,17 +494,23 @@ class Domain(Node):
         d.addCallbacks(onSuccess,onFail)
         return d
     
-    def initialize(self, result=None):
+    def initialize(self, result=None, lastTimeout=None):
         self.rescan_sched = 0
+        if lastTimeout:
+            newTimeout = lastTimeout * 2
+            if newTimeout > maxLoginTimeout:
+                newTimeout = maxLoginTimeout
+        else:
+            newTimeout = loginTimeout
         # if we don't have a token, we need to get one
         if not self.masterLoginToken:
             log.info('Initializing opsview node %s' % self.name)
             d = self.loginMaster()
-            return d.addCallback(self.initialize).addErrback(self.onInitErr)
+            return d.addCallback(self.initialize).addErrback(self.onInitErr, newTimeout)
         else:
             self.creds = {'X-Opsview-Username': self.login, 'X-Opsview-Token': self.masterLoginToken}
-            d = rest_api.getInfo(self.uri, 'rest/status/service', headers=self.creds, timeout=loginTimeout)
-            return d.addCallbacks(self.addServices,self.onInitErr)
+            d = rest_api.getInfo(self.uri, 'rest/status/service', headers=self.creds, timeout=newTimeout)
+            return d.addCallback(self.addServices, newTimeout).addErrback(self.onInitErr, newTimeout)
             
     def getHostByName(self, name):
         return self.children.get(name, None)
@@ -539,7 +564,7 @@ class Domain(Node):
                     log.debug('initialize failed, rescan already scheduled within the next two minutes')
             return False
             
-    def addServices(self, result=None):
+    def addServices(self, result=None, curTimeout=None):
         self.cred_time = int(time.time())
         if not result:
             log.debug('No services to add')
@@ -606,7 +631,7 @@ class Domain(Node):
                     host.addChild(svc_obj)
             log.info('found %s hosts for node %s' % (host_count, self.name))
             perfmetrics = rest_api.getInfo(self.uri, 'rest/runtime/performancemetric', headers=self.creds, timeout=dataTimeout)
-            perfmetrics.addCallbacks(self.saveMetricData,self.onErr)
+            perfmetrics.addCallback(self.saveMetricData).addErrback(self.onErr, curTimeout)
             return perfmetrics
                 
     def getName(self):
@@ -1085,7 +1110,10 @@ for section in cfg_sections:
         server_host = utils.config.get(section, "host")
         server_login = utils.config.get(section, "login")
         server_password = utils.config.get(section, "password")
-        server_tkt_shared = utils.config.get(section, "shared_secret")
+        try:
+            server_tkt_shared = utils.config.get(section, "shared_secret")
+        except:
+            server_tkt_shared = None
         server_api_tool = utils.config.get(section, "api_tool")
         server_rescan = utils.config.get(section, "rescan")
         try:

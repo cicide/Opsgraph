@@ -6,6 +6,9 @@ from twisted.application import internet
 import urllib, json, exceptions
 import utils
 
+getTimeout = 20
+putTimeout = 20
+
 log = utils.get_logger("RAPIService")
 
 class RestResource(object):
@@ -69,7 +72,7 @@ class dataFetcher(object):
             return result
             
         
-    def getData(self, headers, cookies, getTimeout=10):
+    def getData(self, headers, cookies, getTimeout=getTimeout):
         uri = '%s/%s' % (self.srv_uri, self.rest_uri)
         d = RestResource(uri)
         log.debug('requesting %s with headers: %s and cookies: %s' % (uri, headers, cookies))
@@ -77,7 +80,7 @@ class dataFetcher(object):
         dc = reactor.callLater(getTimeout, x.cancel)
         return x.addCallbacks(self.timeOutSucceed,self.timeOutFail).addCallbacks(self.onResult,self.onError)
     
-    def postData(self, postData, headers, cookies, putTimeout=10):
+    def postData(self, postData, headers, cookies, putTimeout=putTimeout):
         uri = '%s/%s' % (self.srv_uri, self.rest_uri)
         d = RestResource(uri)
         log.debug('posting to %s' % uri)
