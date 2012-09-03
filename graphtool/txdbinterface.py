@@ -8,6 +8,7 @@ import threading
 import Queue
 import utils
 import time, pickle
+import datetime
 
 log = utils.get_logger("txDBmysql")
 
@@ -42,34 +43,137 @@ class txDBInterface:
             return self.runQuery()
         self.resultdf.errback(error)
     
+def _createUser(txn, subscriber):
+    #runs in a thread, won't block
+    time_now = datetime.datetime.utcnow()
+    sql = """INSERT INTO users (username,
+                                password,
+                                salt,
+                                first_name,
+                                last_name,
+                                create_date
+                                ) VALUES ('%s', '%s', '%s', '%s', '%s', '%s')"""
+    sql_args = (subscriber.username,
+                subscriber.password,
+                subscriber.salt,
+                subscriber.first_name,
+                subscriber.last_name,
+                time_now.strftime('%Y-%m-%d %H-%M-%S'))
+    sql_q = sql % sql_args
+    log.debug('_createUser: executing query %s' % sql_q)
+    txn.execute(sql_q)
+    log.debug('_createUser: getting insert id')
+    txn.execute("""SELECT LAST_INSERT_ID()""")
+    log.debug('_createUser: firing off transaction')
+    result = txn.fetchall()
+    log.debug('_createUser: returned from transaction')
+    if result:
+        log.debug('got query result: %s' % result[0][0])
+        return result[0][0]
+    else:
+        return False
+
+def _createOpsviewUser(txn, subscriber, userid):
+    log.debug("_createOpsviewUser starting with userid = %s"%userid)
+    #runs in a thread, won't block
+    time_now = datetime.datetime.utcnow()
+    opsview_creds = subscriber.opsview_creds
+    if opsview_creds:
+        for cred in opsview_creds:
+            sql = """INSERT INTO opsview_users (user_id,
+                                                server_name,
+                                                login_id,
+                                                password,
+                                                create_date
+                                ) VALUES ('%d', '%s', '%s', '%s', '%s')"""
+            sql_args = (userid,
+                        cred["server_name"],
+                        cred["login_id"],
+                        cred["password"],
+                        time_now.strftime('%Y-%m-%d %H-%M-%S'))
+            sql_q = sql % sql_args
+            log.debug('_createOpsviewUser: executing query %s' % sql_q)
+            txn.execute(sql_q)
+            log.debug('_createOpsviewUser: getting insert id')
+            txn.execute("""SELECT LAST_INSERT_ID()""")
+            log.debug('_createOpsviewUser: firing off transaction')
+            result = txn.fetchall()
+            log.debug('_createOpsviewUser: returned from transaction')
+            if result:
+                log.debug('_createOpsviewUser: got query result: %s' % result[0][0])
+            else:
+                return False
+    else:
+        log.error("_createOpsviewUser: No opsview creds given for storing")
+        return False
+    return True
+
 def _getUserData(txn, username):
     #runs in a thread, won't block
-    sql = """SELECT id from users where username = '%s'"""
+    sql = """SELECT id, username, password, salt, first_name, last_name, force_pass_change 
+             from users where username = '%s'"""
     sql_args = (username)
     sql_q = sql % sql_args
     log.debug('execting query %s' % sql_q)
     txn.execute(sql_q)
     result = txn.fetchall()
-    if not result:
-        log.debug('Got no result for query %s' % sql_q)
-        sql = """INSERT INTO users (username) VALUES ('%s')"""
-        sql_args = (username)
-        sql_q = sql % sql_args
-        log.debug('executing query %s' % sql_q)
-        txn.execute(sql_q)
-        log.debug('getting insert id')
-        txn.execute("""SELECT LAST_INSERT_ID()""")
-        log.debug('firing off transaction')
-        result = txn.fetchall()
-        log.debug('returned from transaction')
-        if result:
-            log.debug('got query result: %s' % result[0][0])
-            return result[0][0]
-        else:
-            return False
-    else:
+    if result:
+        log.debug('Got result for query %s' % sql_q)
         log.debug('got query result: %s' % result[0][0])
-        return result[0][0]
+        return result
+    else:
+        log.debug('got no result for query %s'%sql_q)
+        return False
+
+def _getOpsviewUserData(txn, userid):
+    #runs in a thread, won't block
+    sql = """SELECT server_name, login_id, password
+             from opsview_users where user_id = %d"""
+    sql_args = (userid)
+    sql_q = sql % sql_args
+    log.debug('execting query %s' % sql_q)
+    txn.execute(sql_q)
+    result = txn.fetchall()
+    if result:
+        log.debug('Got result for query %s' % sql_q)
+        log.debug('got query result: %s' % result[0][0])
+        return result
+    else:
+        log.debug('got no result for query %s'%sql_q)
+        return False
+
+def _storePassword(txn, subscriber):
+    #runs in a thread, won't block
+    sql = """UPDATE users
+             SET password = '%s',
+             salt = '%s',
+             force_pass_change = %d
+             WHERE username = '%s'"""
+    sql_args = (subscriber.password, subscriber.salt, subscriber.force_pass_change, subscriber.username)
+    sql_q = sql % sql_args
+    log.debug('execting query %s' % sql_q)
+    txn.execute(sql_q)
+    return True
+
+def _storeOpsviewCreds(txn, subscriber):
+    #runs in a thread, won't block
+    opsview_creds = subscriber.opsview_creds
+    if opsview_creds:
+        for cred in opsview_creds:
+            sql = """UPDATE opsview_users
+                     SET password = '%s',
+                     login_id = '%s'
+                     WHERE user_id = %d
+                     and server_name = '%s'"""
+            sql_args = (cred["password"],
+                        cred["login_id"],
+                        subscriber.dbId,
+                        cred["server_name"])
+            sql_q = sql % sql_args
+            log.debug('_storeOpsviewCreds: executing query %s' % sql_q)
+            txn.execute(sql_q)
+
+    return True
 
 def _getEventData(txn, node):
     sql = """ SELECT e.id,
@@ -459,6 +563,9 @@ def deleteGraphs(graph_ids):
 def getUserData(username):
     return dbi.runInteraction(_getUserData, username)
 
+def getOpsviewUserData(userid):
+    return dbi.runInteraction(_getOpsviewUserData, userid)
+
 def getEventData(node):
     return dbi.runInteraction(_getEventData, node)
 
@@ -479,6 +586,37 @@ def loadGraphParameters(graph_id):
 
 def loadGraphSeries(graph_id):
     return dbi.runInteraction(_loadGraphSeries, graph_id)
+
+def storePassword(subscriber):
+    return dbi.runInteraction(_storePassword, subscriber)
+
+def storeOpsviewCreds(subscriber):
+    return dbi.runInteraction(_storeOpsviewCreds, subscriber)
+
+def createUser(subscriber):
+    def onSuccess(result):
+        log.debug ("++++++++++++ createUser success +++++++++++")
+        d = dbi.runInteraction(_createOpsviewUser, subscriber, result)
+        d.addCallback(onOpsviewCreateSuccess, result)
+        d.addErrback(onOpsviewCreateFailure)
+        return d
+
+    def onFailure(reason):
+        log.error(reason)
+        return reason
+
+    def onOpsviewCreateSuccess(result, userDbId):
+        log.debug ("++++++++++++ createOpsviewUser success +++++++++++")
+        return userDbId
+
+    def onOpsviewCreateFailure(reason):
+        log.error(reason)
+        return reason
+
+    # store the user
+    d = dbi.runInteraction(_createUser, subscriber)
+    d.addCallbacks(onSuccess,onFailure)
+    return d
 
 def texecute(qlist):
     for sql in qlist:

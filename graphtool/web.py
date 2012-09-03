@@ -2,6 +2,7 @@
 
 from zope.interface import implements, Interface, Attribute
 from twisted.python import filepath, util
+from twisted.python.failure import DefaultException
 from twisted.internet import defer, ssl
 from twisted.application import internet
 from twisted.cred import checkers, error as credError
@@ -11,7 +12,9 @@ from nevow import appserver, athena, loaders, rend, inevow, guard, inevow, url, 
 from nevow.inevow import ISession, IRequest
 from nevow.athena import expose
 import random, os, time, string, json
-import utils, subscriber
+import utils, subscriber, authentication
+from authforms import ForgotPasswordForm, ChangePasswordForm, RegisterForm
+from opsview import node_list as allowed_node_list
 
 log = utils.get_logger("WEBService")
 trueVals = ('Yes', 'yes', 'True', 'true')
@@ -53,23 +56,43 @@ class opsviewWebChecker:
         pass
     
     def requestAvatarId(self, credentials):
+        log.debug("requestAvatarId() Entered:%s"%str(credentials))
+        def onLoginSuccess(sub):
+            log.debug("++++++++ requestAvatarId onLoginSuccess +++++++")
+            auth_result = sub.authenticateNodes()
+            return auth_result.addCallback(onSuccess, sub).addErrback(onFailure)
+
+        def onLoginFailure(failure):
+            log.debug("++++++++ requestAvatarId onLoginFailure +++++++")
+            log.error(failure)
+            log.error(failure.getErrorMessage())
+            de = failure.trap(authentication.ForcePasswordChange, DefaultException)
+            if de == authentication.ForcePasswordChange:
+                return defer.fail(credError.UnauthorizedLogin("Please change your password by going to the Change Password page."))
+            elif de == DefaultException:
+                return defer.fail(credError.UnauthorizedLogin("Unable to login. %s"%failure.getErrorMessage()))
+            return defer.fail(credError.UnauthorizedLogin("Incorrect Login"))
+
         def onSuccess(result, sub):
+            log.debug("++++++++ requestAvatarId onSuccess +++++++")
             log.debug('Got login request result: %s' % result)
             if result:
                 return defer.succeed(sub)
             else:
-                return defer.fail(credError.UnauthorizedLogin("Incorrect Login"))
-        def onFailure(reason):
-            log.debug(reason)
+                return defer.succeed(sub)
+                #return defer.fail(credError.UnauthorizedLogin("Incorrect Opsview Credentials"))
+
+        def onFailure(failure):
+            log.debug("++++++++ requestAvatarId onFailure +++++++")
+            log.debug(failure)
             return defer.fail(credError.UnauthorizedLogin("Incorrect Login"))
+
         uname = credentials.username
         passwd = credentials.password
-        sub = subscriber.addSubscriber(uname, passwd)
-        if not sub:
-            # a False value for sub means the user is already logged in
-            return defer.fail(credError.LoginDenied("User already logged in."))
-        auth_result = sub.authenticateNodes()
-        return auth_result.addCallback(onSuccess, sub).addErrback(onFailure)
+        d = subscriber.loginSubscriber(uname, passwd)
+        d.addCallback(onLoginSuccess)
+        d.addErrback(onLoginFailure)
+        return d
         
 class opsviewRealm(object):
     implements(IRealm)
@@ -186,14 +209,28 @@ class LoginForm(rend.Page):
     
     #def child_viewSuite(self, ctx):
         #return ViewSuitesPage()
+
+    def child_register(self, ctx):
+        log.debug("LoginForm:child_register(): Called")
+        return RegisterForm()
     
+    def child_forgot(self, ctx):
+        log.debug("LoginForm:child_forgot(): Called")
+        return ForgotPasswordForm()
+    
+    def child_change(self, ctx):
+        log.debug("LoginForm:child_change(): Called")
+        return ChangePasswordForm()
+
     def _renderErrors(self, ctx, data):
         log.debug('login page context: %s' % ctx)
         log.debug('login page data: %s' % data)
         request = IRequest(ctx)
-        log.debug('login request: %s' % request)
+        log.debug('login request: %s' % str(request.args))
         if 'login-failure' in request.args:
-            loginError = 'Invalid Login'
+            loginError = request.args["login-failure"][0]
+            log.debug('login failure message: %s' % loginError)
+            #loginError = 'Invalid Login'
         else:
             loginError = ''
         return loginError
@@ -236,7 +273,7 @@ class LoginForm(rend.Page):
                                     T.td(class_='loginErr', colspan='2') [_renderErrors]
                                 ],
                                 T.tr[
-                                    T.td[ "Username:" ],
+                                    T.td[ "Login ID:" ],
                                     T.td[ T.input(type='text', name='username') ],
                                 ],
                                 T.tr[
@@ -247,6 +284,25 @@ class LoginForm(rend.Page):
                                     T.td(align='right', colspan='2')[
                                         T.input(type='submit', value='Login')
                                     ]
+                                ],
+                                T.tr[
+                                    T.td(align='right', colspan='2')[" "]
+                                ],
+                                T.tr[
+                                    T.td(align='right', colspan='2')[" "]
+                                ],
+                                T.tr[
+                                    T.td[T.a(href='/register')['Register']],
+                                    T.td(align='right')[T.a(href='/forgot')['Forgot Password']]
+                                ],
+                                T.tr[
+                                    T.td(align='right', colspan='2')[" "]
+                                ],
+                                T.tr[
+                                    T.td(align='right', colspan='2')[" "]
+                                ],
+                                T.tr[
+                                    T.td(colspan="2", align="center")[T.a(href='/change')['Change Password']],
                                 ]
                             ],
                         ]
@@ -299,6 +355,27 @@ class RootPage(rend.Page):
     def child_createSuite(self, ctx):
         return ViewSuitesPage()
 
+    def data_opsviewnodes(self, ctx, data):        
+        authorized_nodes = None
+        if self.subscriber:
+            authorized_nodes = self.subscriber.auth_node_list
+        log.debug("RootPage: opsview nodes - %s"%str(authorized_nodes))        
+        return authorized_nodes
+
+    def render_opsviewnodes(self, ctx, opsviewnodes):
+        ctx_tag = ctx.tag
+        if opsviewnodes:
+            for node in allowed_node_list:
+                ctx_tag.children.append(T.tr[T.td(colspan='2')[' ']])
+                ctx_tag.children.append(T.tr[T.td(colspan='2')[' ']])            
+                status = "Unauthorized!"
+                if node in opsviewnodes.keys():
+                    status = "OK"
+                ctx_tag.children.append(T.tr[T.td['Server: %s'%node], T.td['Status: %s'%status]])             
+
+        log.debug("RootPage:ctx_tag=%s"%str(ctx_tag))
+        return ctx_tag
+
     addSlash = True
     child_css = static.File('css')
     child_images = static.File('image')
@@ -322,31 +399,35 @@ class RootPage(rend.Page):
                                   }
 
                                   #inner {
-                                  width: 300px;
-                                  height: 200px;
-                                  margin-left: -150px;  /***  width / 2   ***/
+                                  width: 400px;
+                                  height: 300px;
+                                  margin-left: -200;  /***  width / 2   ***/
                                   position: absolute;
-                                  top: -100px;          /***  height / 2   ***/
+                                  top: -150;          /***  height / 2   ***/
                                   left: 50%;
-                                  }"""
+                                  }
+                                  table
+                                  {
+                                  border-collapse:collapse;
+                                  }
+                                  table, td, th
+                                  {
+                                  border:1px solid black;
+                                  }
+                             """
                     ]
                 ]
             ],
             T.body[
-                T.div[render_navBar]
-                #T.div(id='outer')[
-                    #T.div(id='inner')[
-                        #T.div(align='center')[T.a(id='createGraph', href=url.here.child('createGraph'))['Create a Graph']],
-                        #T.p[''],
-                        #T.div(align='center')[T.a(id='createSuite', href=url.here.child('createSuite'))['Create a Suite']],
-                        #T.p[''],
-                        #T.div(align='center')[T.a(id='loadGraph', href=url.here.child('loadGraph'))['Load a Graph']],
-                        #T.p[''],
-                        #T.div(align='center')[T.a(id='loadSuite', href=url.here.child('loadSuite'))['Load a Graph Suite']],
-                        #T.p[''],
-                        #T.div(align='center')[T.a(href=url.here.child(guard.LOGOUT_AVATAR))['Logout']]
-                    #]
-                #]
+                T.div[render_navBar],
+                T.div(id='outer')[
+                    T.div(id='inner')[
+                      T.table[
+                        T.tr[T.th(align="center", colspan="2")['Authorized Opsview Servers']],
+                        T.p(render=T.directive('opsviewnodes'), data=T.directive('opsviewnodes'))[' ']
+                      ]
+                    ]
+                ]
             ]
         ]
     )
