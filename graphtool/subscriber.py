@@ -741,7 +741,7 @@ class subscriber(object):
         log.debug('startTime: %s' % startTime)
         log.debug('endTime: %s' % endTime)
         #result = opsview.node_list[data_node].fetchData(api_uri, end_time, duration, creds, cookies, (host, service, metric))
-        result = defer.maybeDeferred(opsview.node_list[data_node].fetchData, api_uri, end_time, creds=creds, cookies=cookies, hsm=(host, service, metric), durSet=durSet, endTime=endTime, startTime=startTime, returnData=returnData, skipODW=skipODW)
+        result = defer.maybeDeferred(opsview.node_list[data_node].fetchData, api_uri, end_time, creds=creds, cookies=cookies, hsm=(host, service, metric), durSet=durSet, endTime=endTime, startTime=startTime, returnData=returnData, skipODW=skipODW, dataSubscriber=chart)
         return result
 
     '''
@@ -827,7 +827,7 @@ class subscriber(object):
         result = defer.maybeDeferred(opsview.node_list[data_node].fetchData, api_uri, end_time, creds=creds, cookies=cookies, hsm=(host, service, metric), durSet=durSet, endTime=endTime, startTime=startTime, returnData=returnData, skipODW=skipODW)
         return result
     '''
-
+        
     @_setTouchTime_decorator
     def saveGraph(self, chart):
         return chart.saveGraph()

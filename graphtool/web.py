@@ -407,6 +407,7 @@ class ViewGraphsElement(athena.LiveElement):
         
     def discon(self, result):
         log.debug('this live element has been disconnected')
+        log.debug(result)
         self.subscriber.unregisterLiveElement(self)
 
     def liveUpdate(self, chartId, seriesId, liveData):
@@ -557,6 +558,7 @@ class ViewSuitesElement(athena.LiveElement):
 
     def discon(self, result):
         log.debug('this live element has been disconnected')
+        log.debug(result)
         self.suite.unregisterSubscriber(self)
         self.subscriber.unregisterLiveElement(self)
 
@@ -804,6 +806,7 @@ class LoadSuitesElement(athena.LiveElement):
     
     def discon(self, result):
         log.debug('this live element has been disconnected')
+        log.debug(result)
         self.subscriber.unregisterLiveElement(self)
 
     def initialize(self):
@@ -916,6 +919,7 @@ class LoadGraphsElement(athena.LiveElement):
 
     def discon(self, result):
         log.debug('this live element has been disconnected')
+        log.debug(result)
         self.subscriber.unregisterLiveElement(self)
         
     def initialize(self):
@@ -995,6 +999,7 @@ class ExternalElement(athena.LiveElement):
         
     def discon(self, result):
         log.debug('this live element has been disconnected')
+        log.debug(result)
         self.subscriber.unregisterLiveElement(self)
 
     def setItem(self, item, choice):

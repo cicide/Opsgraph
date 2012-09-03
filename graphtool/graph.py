@@ -449,6 +449,10 @@ class chart(object):
             log.debug('got a liveUpdate for a graph with no listeners')
             self.liveUpdate(False)
         
+    def cacheAddNotify(self, data):
+        """ Called when cache has been updated at our request with odw data"""
+        log.debug("graph::Chart::cacheAddNotify: received cache update of %i records" % len(data))
+        
     def getDataNodes(self):
         return self.dataNodes
 

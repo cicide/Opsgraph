@@ -35,6 +35,7 @@ class TimelineCache(object):
     def __init__(self, name, normalize=False):
         self.name = name
         self.data = {}
+        self.newData = {}   # consists of a timestamp key and a x, y value dictionary of data added
         self.defaultNormalize = normalize # a value in seconds
         self.normalizedData = {} # dictionary storing normalized
         if self.defaultNormalize:
@@ -84,6 +85,7 @@ class TimelineCache(object):
         
     def addData(self, label, uom, data):
         self._ackTouch()
+        newDataTime = int(time.time())
         if not data:
             log.error('cache add with no supplied data')
         else:
@@ -112,7 +114,7 @@ class TimelineCache(object):
             # if the data is handed to us as a list, then convert it to a dict
             if type(data) == list:
                 data = {a: b for a,b in data}
-            # remove any training data with no y value
+            # remove any trailing data with no y value
             tv = data.keys()
             tv.sort()
             while len(data):
@@ -123,11 +125,25 @@ class TimelineCache(object):
                 else:
                     log.debug('done trimming null values')
                     break
+            # the new data with the same x values should have identical y values.
+            # we should validate the new data and throw an error if it doesn't match
+            valListNew = set(data.keys())
+            valListOld = self.data.keys()
+            valCheckList = valListNew.intersection(valListOld)
+            invalidData = []
+            for value in valCheckList:
+                if data[value] != self.data[value]:
+                    invalidData.append(value)
+            if len(invalidData):
+                log.error('Invalid data detected in %i of %i matching records' % (len(invalidData), len(valCheckList)))
             # get the time values from the supplied data that are not currently in the cache
             addList = list(set(data.keys())-set(self.data.keys()))
-            if addList:
+            if len(invalidData):
+                pass
+            elif addList:
+                self.newData[newDataTime] = {}
                 for tv in addList:
-                    self.data[tv] = data[tv]
+                    self.data[tv] = self.newData[newDataTime][tv] = data[tv]
                 log.debug('added %i items to cache' % len(addList))
             else:
                 log.debug('cache already has all supplied data')
@@ -660,7 +676,7 @@ class Domain(Node):
         else:
             return None
         
-    def fetchData(self, api_uri, end_time, creds={}, cookies={}, hsm=None, durSet=(), timeout=dataTimeout, endTime=None, startTime=None, returnData=True, skipODW=False, retry=0):
+    def fetchData(self, api_uri, end_time, creds={}, cookies={}, hsm=None, durSet=(), timeout=dataTimeout, endTime=None, startTime=None, returnData=True, skipODW=False, retry=0, dataSubscriber=None):
         log.debug('node data fetch request with timeout of %s' % timeout)
         if not end_time:
             end_time = int(time.time())
@@ -677,7 +693,7 @@ class Domain(Node):
                         # the host, service, metric is valid, request the data
                         log.debug('start Time: %s' % startTime)
                         log.debug('end Time: %s' % endTime)
-                        result =  m_metric.getData(self.uri, self.api_tool, api_uri, end_time, durSet, headers=creds, cookies=cookies, timeout=timeout, end=endTime, start=startTime, returnData=returnData, skipODW=skipODW, retry=retry)
+                        result =  m_metric.getData(self.uri, self.api_tool, api_uri, end_time, durSet, headers=creds, cookies=cookies, timeout=timeout, end=endTime, start=startTime, returnData=returnData, skipODW=skipODW, retry=retry, dataSubscriber=dataSubscriber)
                         return result
                     else:
                         log.error('no valid metric found')
@@ -941,7 +957,7 @@ class Metric(Node):
             metricResult = result[0]
             unitResult = result[1][0]
             if len(result):
-                log.debug('got result of lenght: %s' % len(result))
+                log.debug('got result of length: %s' % len(result))
                 uom = unitResult
                 label = hsm
                 dataSet = {}
@@ -962,13 +978,13 @@ class Metric(Node):
                     log.debug('falling back to rest request')
                     return self._fetchRestData(uri, api_tool, hsm, headers, cookies, timeout, reqStart, reqEnd, retry=retry, returnData=returnData, missStart=missStart, missEnd=missEnd)
         def onFailure(reason):
-            log.debug('got db error')
+            log.debug('got db error: %s' % reason)
             if not uri:
                 log.debug('missing uri, unable to fall back to rest request')
                 return reason
             else:
                 log.debug('falling back to rest request')
-                return self._fetchRestData(uri, api_tool, hsm, headers, cookies, timeout, reqStart, reqEnd, retry=retry, returnData=returnData, missStart=missStart, missEnd=missEnd)
+                #return self._fetchRestData(uri, api_tool, hsm, headers, cookies, timeout, reqStart, reqEnd, retry=retry, returnData=returnData, missStart=missStart, missEnd=missEnd)
         host, service, metric = hsm.split('::')
         if missStart is not None:
             fetchStart = missStart
@@ -982,8 +998,8 @@ class Metric(Node):
             if uri:
                 tmpReqStart = int(time.time() - 1200)
                 tmpReqEnd = int(time.time())
-                log.debug('getting lastest 15 minutes of data via rest api')
-                tmp = self._fetchRestData(uri, api_tool, hsm, headers, cookies, timeout, tmpReqStart, tmpReqEnd, retry, False)
+                #log.debug('getting lastest 15 minutes of data via rest api')
+                #tmp = self._fetchRestData(uri, api_tool, hsm, headers, cookies, timeout, tmpReqStart, tmpReqEnd, retry, False)
         d = txdbinterface.loadOdwData(odwHost, odwDb, odwUser, odwPass, host, service, metric, fetchStart, fetchEnd)
         d.addCallback(onSuccess, reqStart, reqEnd, hsm).addErrback(onFailure)
         return d
@@ -992,7 +1008,9 @@ class Metric(Node):
         self.live = self.reactor.callLater(cacheLatency, self._getLiveData, uri, api_tool, h_s_m, int(time.time()), ('-', 1, 'h'), headers, cookies, timeout)
         return self.getData(uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout)
     
-    def getData(self, uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout, returnData=True, skipODW=False, retry=0, start=None, end=None):
+    def getData(self, uri, api_tool, h_s_m, end_time, durSet, headers, cookies, timeout, returnData=True, skipODW=False, retry=0, start=None, end=None, dataSubscriber=None):
+        def onErr(reason):
+            log.debug('opsview::Metric::getData got error: %s' % reason)
         log.debug('get maybe cached data called with timeout of %s' % timeout)
         if (start and end):
             reqStart = start
@@ -1016,12 +1034,16 @@ class Metric(Node):
                 hasOdw = False
             if hasOdw:
                 log.debug('fetching missing data from ODW')
-                d = self._fetchOdwData(odwHost, odwDb, odwUser, odwPass, h_s_m, reqStart, reqEnd, uri, api_tool, headers, cookies, timeout, retry=retry, returnData=returnData, missStart=missStart, missEnd=missEnd)
-                return d
-            else:
-                log.debug('fetching missing data from API')
-                return self._fetchRestData(uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=retry, returnData=returnData, missStart=missStart, missEnd=missEnd)
-            
+                #d = self._fetchOdwData(odwHost, odwDb, odwUser, odwPass, h_s_m, reqStart, reqEnd, uri, api_tool, headers, cookies, timeout, retry=retry, returnData=returnData, missStart=missStart, missEnd=missEnd)
+                #return d
+                # queue up an odw request, but don't wait on it
+                d = self._fetchOdwData(odwHost, odwDb, odwUser, odwPass, h_s_m, reqStart, reqEnd, uri, api_tool, headers, cookies, timeout, retry=retry, returnData=True, missStart=missStart, missEnd=missEnd)
+                if dataSubscriber:
+                    d.addCallback(dataSubscriber.cacheAddNotify).addErrback(onErr)
+            #else:
+                #log.debug('fetching missing data from API')
+                #return self._fetchRestData(uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=retry, returnData=returnData, missStart=missStart, missEnd=missEnd)
+            return self._fetchRestData(uri, api_tool, h_s_m, headers, cookies, timeout, reqStart, reqEnd, retry=retry, returnData=returnData, missStart=missStart, missEnd=missEnd)
 
     def makeLive(self, uri, api_tool, h_s_m, headers, cookies, timeout):
         if self.live:
