@@ -6,9 +6,11 @@ Utils module for servers
 import logging
 import logging.handlers
 import ConfigParser
-
+import re
 import os 
 import sys
+import string
+import random
 
 
 def set_log_level(log):
@@ -55,6 +57,16 @@ def get_config():
     
     return _config
     
+def pass_generate(size=7, chars=string.ascii_letters + string.digits):
+    ''' Generate a random 7 letter password with letters and digits '''
+    return ''.join(random.choice(chars) for x in range(size))
+
+def is_valid_email(email):
+
+    if len(email) > 7:
+        if re.match("^.+\\@(\\[?)[a-zA-Z0-9\\-\\.]+\\.([a-zA-Z]{2,3}|[0-9]{1,3})(\\]?)$", email) != None:
+            return 1
+	return 0
 
 def config_log():
     logpath = _config.get("general", "logpath")

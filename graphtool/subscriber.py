@@ -3,10 +3,13 @@
 from twisted.internet import defer
 from twisted.internet.task import LoopingCall
 import json, time, datetime, re
-import utils, opsview, txdbinterface, graph
+import utils, opsview, txdbinterface, graph, authentication, emailhelper
 
 log = utils.get_logger("SubscriberService")
 
+PASS_MSG = '''Hi,\n\n Your graphtool password has been reset to a temporary password.\n\n You will be forced to change your password when you try to login with this temporary password.\n\n The temporary password is:%s \n\nSincerely,\nThe Graphtool Team '''
+SMTP_HOST      = utils.config.get('mail', 'smtp_host')
+USE_GMAIL_SMTP = utils.config.get('mail', 'use_gmail')
 date_format = utils.config.get('graph', 'date_format')
 def_dur_len = utils.config.get('graph', 'duration_length')
 def_dur_unit = utils.config.get('graph', 'duration_unit')
@@ -62,31 +65,325 @@ subscribers = {}
 
 class subscriber(object):
 
-    def __init__(self, username, password):
-        self.username = username
-        self.password = password
+    def __init__(self, username, password, first_name = None, last_name = None, opsview_creds = []):
+        self.username       = username
+        self.password       = password
+        self.raw_password   = password
+        self.salt           = None
+        self.first_name     = first_name
+        self.last_name      = last_name
+        self.force_pass_change = False
+        self.opsview_creds  = opsview_creds #[{"server_name":"", "login_id":"", "password":""},{}] 
         self.auth_node_list = {}  # dictionary of node_name: [auth_token, cred_time]
-        self.authed = False
-        self.auth_count = 0
-        self.auth_tkt = None
-        self.web_session = None # this is the opsview web session, not the user's web session
-        self.webSession = None # this is the users web session
-        self.currentChart = None # describes a the current chart being edited 
-        self.dbId = None
-        self.chartList = []
-        self.livePageList = []
-        self.liveCharts = {}
+        self.authed         = False
+        self.auth_count     = 0
+        self.auth_tkt       = None
+        self.web_session    = None # this is the opsview web session, not the user's web session
+        self.webSession     = None # this is the users web session
+        self.currentChart   = None # describes a the current chart being edited 
+        self.dbId           = None
+        self.chartList      = []
+        self.livePageList   = []
+        self.liveCharts     = {}
         self.reauth_node_set = set([])
+
+        
+    def setPassword(self, password):
+        log.debug("subscriber:setPassword:Called")
+        try:
+            scrambled_passwd = authentication.ScrambledPassword(password, self.salt)
+            if scrambled_passwd != self.password:
+                scrambled_passwd = authentication.ScrambledPassword(password)
+                self.password    = scrambled_passwd.getHashed() 
+                self.salt        = scrambled_passwd.getSalt() 
+        except authentication.PasswordException, e:
+            log.exception("setPassword: Exception - %s"%e.message)
+            return defer.fail(e)
+
+        # Scramble the opsview passwords
+        if self.opsview_creds:
+            for opsview_cred in self.opsview_creds:
+                try:
+                    crypter = authentication.Crypter()
+                    opsview_cred["password"] = crypter.encrypt(opsview_cred["password"], self.raw_password)
+                    log.info("setPassword: %s password encrypted"%opsview_cred["server_name"])
+                except authentication.CheckSumError, e:
+                    log.exception("setPassword: Exception with opsview password for %s - %s"%(opsview_cred["server_name"], e.message))
+                    return defer.fail(e)
+
+        log.debug("setPassword: Exiting with opsviewcreds %s"%self.opsview_creds)
+        return defer.succeed(True)
+
+    def checkPassword(self):
+        log.debug("subscriber:checkPassword:Called")
+        try:
+            #log.debug("subscriber:checkPassword:raw_password=%s password=%s salt=%s"%(self.raw_password, self.password, self.salt))
+            scrambled_passwd = authentication.ScrambledPassword(self.raw_password, self.salt)
+            if scrambled_passwd != self.password:
+                return defer.fail("Password does not match")
+        except authentication.PasswordException, e:
+            log.exception("checkPassword: Exception - %s"%e.message)
+            return defer.fail(e)
+        return defer.succeed(True)
+
+    def setup(self):
+        ''' Create a new subscriber in the DB '''
+        
+        log.debug("subscriber:setup:Called")
+
+        def onPassSuccess(result):
+            log.debug("+++++ onPassSuccess +++++++")
+            log.debug("setup: Password valid. Now store in DB. Result = %s"%str(result))
+            # Store the sub into the DB
+            d = txdbinterface.createUser(self)
+            d.addCallbacks(self.onCreateSuccess, self.onCreateFailure)
+            return d
+
+        def onPassFailure(failure):
+            log.debug("+++++ onPassFailure +++++++")
+            log.error("create: Password failure - %s"%failure)
+            return failure
+
+        # set the password
+        d = self.setPassword(self.password)
+        d.addCallback(onPassSuccess)
+        d.addErrback(onPassFailure)
+
+        return d
+
+    def onCreateSuccess(self, result):
+        log.debug('onCreateSuccess: got db id %s' % result)
+        self.dbId = result
+        return self.dbId
+             
+    def onCreateFailure(self, failure):
+        log.error("onCreateFailure: Error creating subscriber - %s"%failure)
+        return failure
+
+    def _setTouchTime_decorator(target_function):
+
+        def wrapper(self, *args, **kwargs):
+            lastTouched = int(time.time() - self._touchTime)
+            self._touchTime = int(time.time())
+            return target_function(self, *args, **kwargs)
+        return wrapper
+
+    def login(self):
+        d = txdbinterface.getUserData(self.username)
+        d.addCallbacks(self.onRetreiveSuccess, self.onRetreiveFailure)
+        log.debug('login: subscriber %s initialized' % self.username)
+        return d
+
+    def _setSubscriber(self, user_record):
+        self.dbId              = user_record[0][0]
+        self.username          = user_record[0][1]
+        self.password          = user_record[0][2]
+        self.salt              = user_record[0][3]
+        self.first_name        = user_record[0][4]
+        self.last_name         = user_record[0][5]
+        self.force_pass_change = user_record[0][6]
+
+    def onRetreiveSuccess(self, result):
+        log.debug('onRetreiveSuccess: got db id %s' % result)
+        if result and type(result) != type(bool()):
+            self._setSubscriber(result)
+            # Check if we need to force password reset
+            if self.force_pass_change:
+                return defer.fail(authentication.ForcePasswordChange("Please change your password"))
+            d =  self.checkPassword()
+            d.addCallback(self.onLoginSuccess)
+            d.addErrback(self.onLoginFailure)
+            return d
+        return defer.fail("Unable to retreive user")
+
+    def onRetreiveFailure(self, failure):
+        log.debug("++++++ OnRetreiveFailure ++++++")
+        log.error(failure)
+        return failure
+
+    def onLoginSuccess(self, result):
+        log.debug("++++++ onLoginSuccess ++++++")
+        subscribers[self.username] = self
+        d =  txdbinterface.getOpsviewUserData(self.dbId)
+        d.addCallback(self.onLoginComplete)
+        d.addErrback(self.onLoginCompleteFailure)
+
         self._touchTime = int(time.time())
         self.timeoutChecker = LoopingCall(self._checkTimeout)
         self.timeoutChecker.start(5)
-        d = txdbinterface.getUserData(self.username)
-        d.addCallbacks(self.setDbId,self.onFailure)
-        log.debug('subscriber %s added' % self.username)
-        
-    def onFailure(self, reason):
-        log.error(reason)
 
+        return d
+
+    def onLoginFailure(self, failure):
+        log.debug("++++++ onLoginFailure ++++++")
+        log.error(failure)
+        return failure
+
+    def _setSubscriberOpsviewData(self, opsview_records):
+        for record in opsview_records:
+            opsview_cred = {}
+            opsview_cred["server_name"] = record[0]
+            if type(opsview_cred["server_name"]) is unicode:
+                opsview_cred["server_name"] = opsview_cred["server_name"].encode('utf-8')
+            opsview_cred["login_id"]    = record[1]
+            if type(opsview_cred["login_id"]) is unicode:
+                opsview_cred["login_id"] = opsview_cred["login_id"].encode('utf-8')
+            opsview_cred["password"]    = record[2]
+            if type(opsview_cred["password"]) is unicode:
+                opsview_cred["password"] = opsview_cred["password"].encode('utf-8')
+            self.opsview_creds.append(opsview_cred)
+            log.debug("subscriber: Retrieved opsview_cred - %s"%opsview_cred)
+
+    @_setTouchTime_decorator
+    def onLoginComplete(self, result):
+        log.debug("++++++ OnLoginComplete ++++++")
+        if result and type(result).__name__ == 'list':
+            self._setSubscriberOpsviewData(result)
+        return self
+
+    def onLoginCompleteFailure(self, failure):
+        log.debug("++++++ OnLoginCompleteFailure ++++++")
+        log.error(failure)
+        log.debug("User does not have any opsview credentials!")
+        return True
+
+    def updatePassword(self, new_password, opsview_creds):
+        ''' Update the password, and rejigger the opsview credentials '''
+
+        def onRetreiveSuccess(result, opsview_creds):
+            log.debug('updatePassword: onRetreiveSuccess: got db id %s' % result)
+            if result and type(result) != type(bool()):
+                self._setSubscriber(result)
+                # Check if old password is right
+                d =  self.checkPassword()
+                d.addCallback(onLoginSuccess, opsview_creds)
+                d.addErrback(onLoginFailure)
+                return d
+            return defer.fail("Unable to retreive user")
+
+        def onRetreiveFailure(failure):
+            log.debug("updatePassword: ++++++ OnRetreiveFailure ++++++")
+            log.error(failure)
+            return failure
+
+        def onLoginSuccess(result, opsview_creds):
+            log.debug("updatePassword: ++++++ OnLoginSuccess ++++++")
+            self.opsview_creds = opsview_creds
+            d = self.resetPassword(new_password)
+            d.addCallback(onPassChangeSuccess)
+            d.addErrback(onPassChangeFailure)
+            return d
+
+        def onLoginFailure(failure):
+            log.debug("updatePassword: ++++++ OnLoginFailure ++++++")
+            log.error(failure)
+            return failure
+
+        def onPassUpdateSuccess(result):
+            log.debug("++++++ onPassUpdateSuccess +++++") 
+            log.debug("store opsview creds result = %s"%result)
+            return True
+
+        def onPassUpdateFailure(failure):
+            log.debug("++++++ onPassUpdateFailure +++++") 
+            return failure
+
+        def onPassChangeSuccess(result):
+            log.debug("++++++ onPassChangeSuccess +++++") 
+            d = txdbinterface.storeOpsviewCreds(self)
+            d.addCallback(onPassUpdateSuccess)
+            d.addErrback(onPassUpdateFailure)
+            return d
+
+        def onPassChangeFailure(failure):
+            log.debug("++++++ onPassChangeFailure +++++") 
+            return failure
+
+        # First get the user record and login with old password
+        d = txdbinterface.getUserData(self.username)
+        d.addCallback(onRetreiveSuccess, opsview_creds)
+        d.addErrback(onRetreiveFailure)
+
+        return d
+
+    def resetPassword(self, new_password = None):
+            
+        def onResetSuccess(result, new_pass):
+            log.debug("++++++ onResetSuccess +++++") 
+            if not new_pass:
+                email_helper = emailhelper.EmailSender("noreply@graphtool.com", 
+                                                       self.username, 
+                                                       "Your Graphtool password has been reset", 
+                                                       PASS_MSG%self.raw_password)
+                                                       #"%s %s"%(PASS_MSG, self.raw_password))
+                if USE_GMAIL_SMTP:
+                    log.debug("Sending gmail ... - %s"%USE_GMAIL_SMTP)
+                    email_helper.gmail_send()
+                else:
+                    log.debug("Sending email ...")
+                    email_helper.send(SMTP_HOST)
+            return True
+
+        def onResetFailure(failure):
+            log.debug("++++++ onResetFailure +++++")
+            return failure
+
+        def onPassSetSuccess(result, new_pass):
+            log.debug("++++++ onPassSetSuccess +++++")
+            if not new_pass:
+                self.force_pass_change = True
+            else:
+                self.force_pass_change = False
+            d = txdbinterface.storePassword(self)
+            d.addCallback(onResetSuccess, new_pass)
+            d.addErrback(onResetFailure)
+            return d
+
+        def onPassSetFailure(failure):
+            log.debug("++++++ onPassSetFailure +++++")
+            return failure 
+
+        def onGetUserSuccess(result, new_pass):
+            log.debug("++++++ onGetUserSuccess +++++")
+            if result and type(result) != type(bool()):
+                self._setSubscriber(result)
+                if not new_pass:
+                    temp_pass = utils.pass_generate()
+                else:
+                    temp_pass = new_pass
+                self.raw_password = temp_pass
+                d = self.setPassword(temp_pass)
+                d.addCallback(onPassSetSuccess, new_pass)
+                d.addErrback(onPassSetFailure)
+                return d
+            return defer.fail("Unable to find user")
+
+        def onGetUserFailure(failure):
+            log.debug("++++++ onGetUserFailure +++++")
+            log.error(failure)
+            return failure
+        d = txdbinterface.getUserData(self.username)
+        d.addCallback(onGetUserSuccess, new_password)
+        d.addErrback(onGetUserFailure)
+        return d
+
+    def isDuplicate(self):
+        ''' Check if subscriber with same username exisits in DB '''
+
+        def onIsDuplicateSuccess(result):
+            if result and type(result) != type(bool()):
+       	        return True
+            return False
+
+        def onIsDuplicateFailure(failure):
+            log.error(failure)
+            return failure
+
+        log.debug("isDuplicate: called")
+        d = txdbinterface.getUserData(self.username)
+        d.addCallbacks(onIsDuplicateSuccess, onIsDuplicateFailure)
+        return d
+        
     def _checkTimeout(self):
         currentTime = int(time.time())
         if (currentTime - self._touchTime) > login_timeout:
@@ -164,6 +461,12 @@ class subscriber(object):
     def isAuthed(self):
         return self.authed
 
+    def getUsername(self):
+        username = self.username        
+        if type(username) is unicode:
+            username = username.encode('utf-8')
+        return username
+
     def checkCredentials(self, selected_node):
         def onSuccess(result):
             log.debug('result: %s' % result)
@@ -171,7 +474,8 @@ class subscriber(object):
         def onFailure(reason):
             log.error(reason)
             return False
-        creds = {'X-Opsview-Username': self.username, 'X-Opsview-Token': token}
+        opsview_login, opsview_pass = self._getOpsviewCredentials(selected_node)
+        creds = {'X-Opsview-Username': opsview_login, 'X-Opsview-Token': token}
         token, cred_time = self.auth_node_list[selected_node]
         if (int(time.time()) - cred_time) > 50:
             d = self.authenticateNode(selected_node)
@@ -302,6 +606,25 @@ class subscriber(object):
         return self.dbId
     
     @_setTouchTime_decorator
+    def _getOpsviewCredentials(self, node):
+        login_id = None
+        raw_password = None
+        crypter = authentication.Crypter()
+        if node:
+            for opsview_cred in self.opsview_creds:
+                if opsview_cred["server_name"] == node:
+                    login_id = opsview_cred["login_id"]
+                    try:
+                        raw_password = crypter.decrypt(opsview_cred["password"], self.raw_password)
+                        if type(raw_password) is unicode:
+                            raw_password = raw_password.encode('utf-8')
+                        #log.info("_getOpsviewCredentials: %s password decrypted - %s"%(opsview_cred["server_name"], raw_password))
+                    except authentication.CheckSumError, e:
+                        log.exception("_getOpsviewCredentials: Exception with opsview password for %s - %s"%(opsview_cred["server_name"], e.message))
+                        raw_password = None
+        return (login_id, raw_password)
+
+    @_setTouchTime_decorator
     def authenticateNode(self, auth_node):
         def onLogin(result, auth_node):
             if result:
@@ -332,18 +655,22 @@ class subscriber(object):
                 #return defer.succeed(True)
             else:
                 log.debug('attempting re-auth')
-                login_result = opsview.node_list[auth_node].loginUser(self.username, self.password)
+                opsview_login, opsview_pass = self._getOpsviewCredentials(auth_node)
+                login_result = opsview.node_list[auth_node].loginUser(opsview_login, opsview_pass)
         else:
             log.debug('authenticating new node')
-            login_result = opsview.node_list[auth_node].loginUser(self.username, self.password)
+            opsview_login, opsview_pass = self._getOpsviewCredentials(auth_node)
+            login_result = opsview.node_list[auth_node].loginUser(opsview_login, opsview_pass)
         return login_result.addCallback(onLogin, auth_node).addErrback(onError)
         
     @_setTouchTime_decorator
     def authenticateNodes(self):
         def onSuccess(result):
+            log.debug("++++++++++++++ authenticateNodes onSuccess +++++++++++")
             log.debug('returning login request result: %s' % self.authed)
             return self.authed
         def onNodeSuccess(result):
+            log.debug("++++++++++++++ authenticateNodes onNodeSuccess +++++++++++")
             log.debug('result from node auth request: %s, node count: %s' % (result, self.auth_count))
             #log.debug(result)
             #log.debug(self.auth_node_list)
@@ -354,6 +681,7 @@ class subscriber(object):
                 self.auth_count -= 1
             return self.authed
         def onFailure(reason):
+            log.debug("++++++++++++++ authenticateNodes onFailure +++++++++++")
             log.failure(reason)
         log.debug('Authenticating %s on nodes: %s' % (self.username, opsview.node_list))
         self.authed = False
@@ -718,7 +1046,8 @@ class subscriber(object):
         if data_node not in chart.getDataNodes():
             chart.addDataNode(data_node)
 
-        creds = {'X-Opsview-Username': self.username, 'X-Opsview-Token': self.auth_node_list[data_node][0]}
+        opsview_login, opsview_pass = self._getOpsviewCredentials(data_node)
+        creds = {'X-Opsview-Username': opsview_login, 'X-Opsview-Token': self.auth_node_list[data_node][0]}
         cookies = {'auth_tkt': self.auth_tkt}
         api_uri = '%s::%s::%s' % (host, service, metric)
         chart.setSeriesUri(row, data_node, api_uri)
@@ -801,7 +1130,8 @@ class subscriber(object):
             return d
         if data_node not in chart.getDataNodes():
             chart.addDataNode(data_node)
-        creds = {'X-Opsview-Username': self.username, 'X-Opsview-Token': self.auth_node_list[data_node][0]}
+        opsview_login, opsview_pass = self._getOpsviewCredentials(data_node)
+        creds = {'X-Opsview-Username': opsview_login, 'X-Opsview-Token': self.auth_node_list[data_node][0]}
         cookies = {'auth_tkt': self.auth_tkt}
         api_uri = '%s::%s::%s' % (host, service, metric)
         chart.setSeriesUri(row, data_node, api_uri)
@@ -1077,18 +1407,60 @@ class subscriber(object):
             self.currentChart = self.chartList.pop()
         else:
             self.currentChart = None
-            
-def addSubscriber(username, password):
+        
+###################### Authentication ######################
+def isLoggedIn(username):
     if username in subscribers:
         if subscribers[username].isAuthed():
             log.debug('User %s already logged in' % username)
-            return False
+            return True
+    return False
+
+def loginSubscriber(username, password):
+    if username in subscribers:
+        if subscribers[username].isAuthed():
+            log.debug('User %s already logged in' % username)
+            return defer.fail(credError.LoginDenied("User already logged in."))
         else:
-            subscribers[username] = subscriber(username, password)
+            return subscriber(username, password).login()
     else:
-        subscribers[username] = subscriber(username, password)
-    return subscribers[username]
+        return subscriber(username, password).login()
         
+def createSubscriber(username, password, first_name = None, last_name = None, opsview_creds = None):
+    ''' Create a new user in the system '''
+
+    log.debug("subscriber:createSubscriber called")
+    if not utils.is_valid_email(username):
+        return defer.fail("Invalid login id. Please enter a valid email address")
+    new_subscriber = subscriber(username = username,
+                                password = password,
+                                first_name = first_name,
+                                last_name = last_name,
+                                opsview_creds = opsview_creds)
+    return new_subscriber.setup()
+
+def forgotPassword(username):
+    ''' Reset the password to temporary value and send an email '''
+    log.debug("subscriber: Resetting password for - %s"%username)
+    
+    sub = subscriber(username, None)
+    return sub.resetPassword()
+
+def updatePassword(username, password, new_password, opsview_creds):
+    ''' Save the password and also update opsview credentials '''
+    log.debug("subscriber: Updating password for - %s"%username)
+    
+    sub = subscriber(username, password)
+    return sub.updatePassword(new_password, opsview_creds)
+
+def isDuplicate(username):
+    ''' Check id username is already taken '''
+    #sub = subscriber(username)
+    #return sub.isDuplicate()
+    return False
+
+###################### Authentication ######################
+
 # Load the defined graph sizes from the config file
 
 graph_size = {}

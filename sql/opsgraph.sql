@@ -2,7 +2,7 @@
 --
 -- Host: localhost    Database: graphtool
 -- ------------------------------------------------------
--- Server version       5.0.77
+-- Server version	5.0.77
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -49,7 +49,7 @@ CREATE TABLE `events` (
   `end_time` int(11) NOT NULL,
   `url` varchar(256) NOT NULL default '',
   PRIMARY KEY  (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 SET character_set_client = @saved_cs_client;
 
 --
@@ -74,7 +74,7 @@ CREATE TABLE `graph` (
   `graph_create_date` int(11) unsigned NOT NULL,
   `events` varchar(12) NOT NULL default 'None',
   PRIMARY KEY  (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=46 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 SET character_set_client = @saved_cs_client;
 
 --
@@ -91,7 +91,7 @@ CREATE TABLE `graph_parameters` (
   `p_directive` varchar(80) NOT NULL default '',
   `p_value` varchar(80) NOT NULL default '',
   PRIMARY KEY  (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=549 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 SET character_set_client = @saved_cs_client;
 
 --
@@ -110,7 +110,26 @@ CREATE TABLE `graph_series` (
   `g_service` varchar(255) NOT NULL default '',
   `g_metric` varchar(255) NOT NULL default '',
   PRIMARY KEY  (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=160 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+SET character_set_client = @saved_cs_client;
+
+--
+-- Table structure for table `opsview_users`
+--
+
+DROP TABLE IF EXISTS `opsview_users`;
+SET @saved_cs_client     = @@character_set_client;
+SET character_set_client = utf8;
+CREATE TABLE `opsview_users` (
+  `id` int(11) unsigned NOT NULL auto_increment,
+  `user_id` int(11) NOT NULL,
+  `server_name` varchar(128) NOT NULL,
+  `login_id` varchar(128) NOT NULL,
+  `password` varchar(64) default NULL,
+  `create_date` datetime default NULL,
+  PRIMARY KEY  (`id`),
+  KEY `user_id_index` (`user_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=13 DEFAULT CHARSET=latin1;
 SET character_set_client = @saved_cs_client;
 
 --
@@ -138,7 +157,7 @@ CREATE TABLE `suite` (
   KEY `owner` (`owner_id`),
   KEY `start_date` (`start`),
   KEY `create_date` (`create_date`)
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 SET character_set_client = @saved_cs_client;
 
 --
@@ -150,9 +169,16 @@ SET @saved_cs_client     = @@character_set_client;
 SET character_set_client = utf8;
 CREATE TABLE `users` (
   `id` int(11) unsigned NOT NULL auto_increment,
-  `username` varchar(40) NOT NULL default '',
-  PRIMARY KEY  (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=19 DEFAULT CHARSET=latin1;
+  `username` varchar(128) NOT NULL,
+  `password` varchar(32) default NULL,
+  `salt` varchar(4) default NULL,
+  `first_name` varchar(128) default '',
+  `last_name` varchar(128) default '',
+  `force_pass_change` tinyint(1) default '0',
+  `create_date` datetime default NULL,
+  PRIMARY KEY  (`id`),
+  UNIQUE KEY `unique_username` (`username`)
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=latin1;
 SET character_set_client = @saved_cs_client;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -164,5 +190,4 @@ SET character_set_client = @saved_cs_client;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2012-03-04  1:48:40
-
+-- Dump completed on 2012-08-28  1:08:45
