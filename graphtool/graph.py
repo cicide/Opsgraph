@@ -264,7 +264,10 @@ class suite(object):
         return self.title
     
     def setChartStart(self, start):
-        self.start = start
+        if start > (time.time()-1800):
+            self.start = 'Now'
+        else:
+            self.start = start
         log.debug('suite start set to %s' % self.start)
         self.noteChanges('start', start)
         
@@ -389,7 +392,7 @@ class chart(object):
         if self.start == 'Now':
             log.debug('enable live updates for chart')
             self.liveUpdate(True, 150)
-        elif (time.time() - self.start) < 301:
+        elif (time.time() - self.start) < 601:
             log.debug('enable live updates for chart with start time within five minutes')
             self.liveUpdate(True, 150)
         else:
@@ -544,8 +547,12 @@ class chart(object):
     def getChartStart(self):
         return self.start
     
-    def setChartStart(self, time):
-        self.start = time
+    def setChartStart(self, startTime):
+        if startTime > (time.time()-1800):
+            self.start = 'Now'
+        else:
+            self.start = startTime
+        log.debug('Start time set to %s' % self.start)
     
     def getChartDurationModifier(self):
         return self.durMod
