@@ -138,7 +138,7 @@ class Crypter(object):
             secret = secret.encode('utf-8')
 
         secret = self._lazysecret(secret) if lazy else secret
-        encobj = AES.new(secret, AES.MODE_CFB)
+        encobj = AES.new(secret, AES.MODE_CFB, '0000000000000000')
     
         if checksum:
             plaintext += struct.pack("i", zlib.crc32(plaintext))
@@ -161,7 +161,7 @@ class Crypter(object):
         b64_ciphertext = base64.urlsafe_b64decode(ciphertext) 
         log.debug("authentication:decrypt: b64_ciphertext=%s"%(b64_ciphertext))
         secret = self._lazysecret(secret) if lazy else secret
-        encobj = AES.new(secret, AES.MODE_CFB)
+        encobj = AES.new(secret, AES.MODE_CFB, '0000000000000000')
         plaintext = encobj.decrypt(b64_ciphertext)
     
         if checksum:
