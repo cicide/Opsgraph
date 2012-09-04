@@ -173,3 +173,6 @@ class Crypter(object):
 
 class ForcePasswordChange(Exception):
     pass
+
+class AlreadyLoggedIn(Exception):
+    pass

@@ -1420,7 +1420,7 @@ def loginSubscriber(username, password):
     if username in subscribers:
         if subscribers[username].isAuthed():
             log.debug('User %s already logged in' % username)
-            return defer.fail(credError.LoginDenied("User already logged in."))
+            return defer.fail(authentication.AlreadyLoggedIn("User already logged in."))
         else:
             return subscriber(username, password).login()
     else:

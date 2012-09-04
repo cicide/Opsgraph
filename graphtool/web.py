@@ -66,9 +66,13 @@ class opsviewWebChecker:
             log.debug("++++++++ requestAvatarId onLoginFailure +++++++")
             log.error(failure)
             log.error(failure.getErrorMessage())
-            de = failure.trap(authentication.ForcePasswordChange, DefaultException)
+            de = failure.trap(authentication.ForcePasswordChange, authentication.AlreadyLoggedIn, DefaultException)
             if de == authentication.ForcePasswordChange:
                 return defer.fail(credError.UnauthorizedLogin("Please change your password by going to the Change Password page."))
+            elif de == authentication.AlreadyLoggedIn:
+                #return defer.fail(credError.LoginDenied("You are already logged in elsewhere."))
+                #return defer.fail("You are already logged in elsewhere.")
+                return defer.fail(credError.UnauthorizedLogin("You are already logged in."))
             elif de == DefaultException:
                 return defer.fail(credError.UnauthorizedLogin("Unable to login. %s"%failure.getErrorMessage()))
             return defer.fail(credError.UnauthorizedLogin("Incorrect Login"))
