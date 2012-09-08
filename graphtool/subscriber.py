@@ -110,6 +110,9 @@ class subscriber(object):
                 except authentication.CheckSumError, e:
                     log.exception("setPassword: Exception with opsview password for %s - %s"%(opsview_cred["server_name"], e.message))
                     return defer.fail(e)
+                except Exception, e:
+                    log.exception("setPassword: Exception with opsview password for %s - %s"%(opsview_cred["server_name"], e.message))
+                    return defer.fail(e)
 
         log.debug("setPassword: Exiting with opsviewcreds %s"%self.opsview_creds)
         return defer.succeed(True)
@@ -622,6 +625,10 @@ class subscriber(object):
                     except authentication.CheckSumError, e:
                         log.exception("_getOpsviewCredentials: Exception with opsview password for %s - %s"%(opsview_cred["server_name"], e.message))
                         raw_password = None
+                    except Exception, e:
+                        log.exception("_getOpsviewCredentials: Exception with opsview password for %s - %s"%(opsview_cred["server_name"], e.message))
+                        raw_password = None
+    
         return (login_id, raw_password)
 
     @_setTouchTime_decorator

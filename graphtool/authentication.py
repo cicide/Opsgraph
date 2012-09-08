@@ -1,7 +1,7 @@
 """
 Class to handle subscriber authentication
 """
-import hashlib, random, string
+import hashlib, random, string, os
 import zlib
 import struct
 from Crypto.Cipher import AES
@@ -123,12 +123,11 @@ class Crypter(object):
             return secret + (blocksize - len(secret)) * padding
         return secret
     
-    def encrypt(self, plaintext, secret, lazy=True, checksum=True):
+    def encrypt(self, plaintext, secret, lazy=True):
         """encrypt plaintext with secret
         plaintext   - content to encrypt
         secret      - secret to encrypt plaintext
         lazy        - pad secret if less than legal blocksize (default: True)
-        checksum    - attach crc32 byte encoded (default: True)
         returns ciphertext
         """
     
@@ -138,36 +137,36 @@ class Crypter(object):
             secret = secret.encode('utf-8')
 
         secret = self._lazysecret(secret) if lazy else secret
-        encobj = AES.new(secret, AES.MODE_CFB, '0000000000000000')
+        iv_bytes = os.urandom(16)
+        encobj = AES.new(secret, AES.MODE_CFB, iv_bytes)
     
-        if checksum:
-            plaintext += struct.pack("i", zlib.crc32(plaintext))
+        data = iv_bytes + encobj.encrypt(plaintext) 
+
+        return base64.urlsafe_b64encode(str(data))
     
-        return base64.urlsafe_b64encode(str(encobj.encrypt(plaintext)))
-    
-    def decrypt(self, ciphertext, secret, lazy=True, checksum=True):
+    def decrypt(self, ciphertext, secret, lazy=True):
         """decrypt ciphertext with secret
         ciphertext  - encrypted content to decrypt
         secret      - secret to decrypt ciphertext
         lazy        - pad secret if less than legal blocksize (default: True)
-        checksum    - verify crc32 byte encoded checksum (default: True)
         returns plaintext
         """
-        log.debug("authentication:decrypt: ciphertext=%s, secret=%s"%(ciphertext, secret))
+
+        #log.debug("authentication:decrypt: ciphertext=%s, secret=%s"%(ciphertext, secret))
+
         if type(ciphertext) is unicode:
             ciphertext = ciphertext.encode('utf-8')
         if type(secret) is unicode:
             secret = secret.encode('utf-8')
         b64_ciphertext = base64.urlsafe_b64decode(ciphertext) 
-        log.debug("authentication:decrypt: b64_ciphertext=%s"%(b64_ciphertext))
+        iv_bytes = b64_ciphertext[:16]
+        b64_ciphertext = b64_ciphertext[16:]
+
+        #log.debug("authentication:decrypt: b64_ciphertext=%s"%(b64_ciphertext))
+
         secret = self._lazysecret(secret) if lazy else secret
-        encobj = AES.new(secret, AES.MODE_CFB, '0000000000000000')
+        encobj = AES.new(secret, AES.MODE_CFB, iv_bytes)
         plaintext = encobj.decrypt(b64_ciphertext)
-    
-        if checksum:
-            crc, plaintext = (plaintext[-4:], plaintext[:-4])
-            if not crc == struct.pack("i", zlib.crc32(plaintext)):
-                raise CheckSumError("checksum mismatch")
     
         return plaintext
 
