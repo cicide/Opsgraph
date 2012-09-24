@@ -743,7 +743,9 @@ class chart(object):
                 log.debug('Working on series: %s' % series)
                 data_dict = {}
                 log.debug('grabbing data dictionary from series')
-                if len(data[series]['list']):
+                if not (data[series]):
+                    series_list['data'] = {}
+                elif len(data[series]['list']):
                     series_list = data[series]['list'][0]
                     if 'data' in series_list:
                         log.debug('grabbing raw data from list (lines)')

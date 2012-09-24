@@ -50,7 +50,7 @@ graph_types['HighCharts'] = {'Line': 'line',
                              'Scatter': 'scatter',
                              'Column': 'column',
                              'Bar': 'bar',
-                            }
+                             }
 #graph_size = {}
 #graph_size['Small'] = ('600','400')
 #graph_size['Medium'] = ('800','600')
@@ -87,7 +87,7 @@ class subscriber(object):
         self.liveCharts     = {}
         self.reauth_node_set = set([])
 
-        
+
     def setPassword(self, password):
         log.debug("subscriber:setPassword:Called")
         try:
@@ -128,7 +128,7 @@ class subscriber(object):
 
     def setup(self):
         ''' Create a new subscriber in the DB '''
-        
+
         log.debug("subscriber:setup:Called")
 
         def onPassSuccess(result):
@@ -155,7 +155,7 @@ class subscriber(object):
         log.debug('onCreateSuccess: got db id %s' % result)
         self.dbId = result
         return self.dbId
-             
+
     def onCreateFailure(self, failure):
         log.error("onCreateFailure: Error creating subscriber - %s"%failure)
         return failure
@@ -307,7 +307,7 @@ class subscriber(object):
         return d
 
     def resetPassword(self, new_password = None):
-            
+
         def onResetSuccess(result, new_pass):
             log.debug("++++++ onResetSuccess +++++") 
             if not new_pass:
@@ -315,7 +315,7 @@ class subscriber(object):
                                                        self.username, 
                                                        "Your Graphtool password has been reset", 
                                                        PASS_MSG%self.raw_password)
-                                                       #"%s %s"%(PASS_MSG, self.raw_password))
+                                                        #"%s %s"%(PASS_MSG, self.raw_password))
                 if USE_GMAIL_SMTP:
                     log.debug("Sending gmail ... - %s"%USE_GMAIL_SMTP)
                     email_helper.gmail_send()
@@ -372,7 +372,7 @@ class subscriber(object):
 
         def onIsDuplicateSuccess(result):
             if result and type(result) != type(bool()):
-       	        return True
+                return True
             return False
 
         def onIsDuplicateFailure(failure):
@@ -383,14 +383,14 @@ class subscriber(object):
         d = txdbinterface.getUserData(self.username)
         d.addCallbacks(onIsDuplicateSuccess, onIsDuplicateFailure)
         return d
-        
+
     def _checkTimeout(self):
         currentTime = int(time.time())
         if (currentTime - self._touchTime) > login_timeout:
             log.info('%s logged out due to user timeout' % self.username)
             self.timeoutChecker.stop()
             self.logout()
-        
+
     def logout(self):
         def onAllQuit(result):
             log.debug('all live elements closed')
@@ -426,7 +426,7 @@ class subscriber(object):
 
     def registerAvatarLogout(self, webSession):
         self.webSession = webSession
-        
+
     def registerLiveElement(self, liveElement, chart=None, chartId=None):
         if liveElement not in self.livePageList:
             # Register a new Live Element 
@@ -445,8 +445,8 @@ class subscriber(object):
             # Let the chart object know it's live
             self.liveCharts[liveElement].append(chart)
             chart.addLiveElement(liveElement,chartId)
-                
-    
+
+
     def unregisterLiveElement(self, liveElement):
         # if this live element was registered, we remove it now
         if liveElement in self.livePageList:
@@ -457,7 +457,7 @@ class subscriber(object):
                     # let the chart object know that it's no longer live for this element
                     chart.cancelLiveElement(liveElement)
                 tmp = self.liveCharts.pop(liveElement, None)
-        
+
     def isAuthed(self):
         return self.authed
 
@@ -483,7 +483,7 @@ class subscriber(object):
             return d
         else:
             return True        
-        
+
     def _setTouchTime_decorator(target_function):
 
         def wrapper(self, *args, **kwargs):
@@ -495,7 +495,7 @@ class subscriber(object):
     @_setTouchTime_decorator
     def getDbId(self):
         return self.dbId
-    
+
     @_setTouchTime_decorator
     def setCurrentChart(self, chart):
         self.currentChart = chart
@@ -505,11 +505,11 @@ class subscriber(object):
         if not self.currentChart:
             self.currentChart = graph.chart(self)
         return self.currentChart
-    
+
     @_setTouchTime_decorator
     def editSuiteInit(self, member_list):
         return graph.suite(self.dbId, members=member_list)
-    
+
     @_setTouchTime_decorator
     def loadSuite(self, dbId, perms='ro'):
         log.debug(graph.suites)
@@ -520,36 +520,36 @@ class subscriber(object):
             return graph.suites[int(dbId)].setPermissions(self.dbId, self.dbId, perms)
         else:
             return graph.suite(self.dbId, dbId=dbId, perms=perms)
-    
+
     @_setTouchTime_decorator
     def getSuiteMemberList(self, suite):
         log.debug('getting suite member list')
         return suite.getMemberList()
-    
+
     @_setTouchTime_decorator
     def getSuiteColumns(self, suite):
         return suite.getColumns()
-    
+
     @_setTouchTime_decorator
     def setSuiteColumns(self, suite, numcols):
         suite.setColumns(numcols)
-        
+
     @_setTouchTime_decorator
     def getSuitePermissions(self, suite):
         return suite.getPermissions(self.dbId)
-    
+
     @_setTouchTime_decorator
     def applySuiteOverrides(self, suite):
         return suite.applyOverrides(self)
-    
+
     @_setTouchTime_decorator
     def saveSuite(self, suiteList, suite):
         return suite.saveSuite(suiteList)
-    
+
     @_setTouchTime_decorator
     def addSuiteGraph(self, suite, chart, chart_id):
         suite.addGraphReference(chart, chart_id, self)
-    
+
     @_setTouchTime_decorator
     def getSavedSuiteList(self):
         def onSuccess(result):
@@ -568,7 +568,7 @@ class subscriber(object):
         d = txdbinterface.getSuiteList(self.username)
         d.addCallbacks(onSuccess,onFailure)
         return d
-    
+
     @_setTouchTime_decorator
     def initializeGraphPage(self, chart):
         if not chart:
@@ -591,20 +591,20 @@ class subscriber(object):
             #event_types.append(e_type)
         chart.setEventTypeList(event_types)
         return chart.getEventTypeList()
-    
+
     @_setTouchTime_decorator
     def getSelectedEventType(self, chart):
         return chart.getEventsDisplay()
-    
+
     @_setTouchTime_decorator
     def setDbId(self, result):
         log.debug('got db id %s' % result)
         self.dbId = result
-        
+
     @_setTouchTime_decorator
     def getDbId(self):
         return self.dbId
-    
+
     @_setTouchTime_decorator
     def _getOpsviewCredentials(self, node):
         login_id = None
@@ -662,7 +662,7 @@ class subscriber(object):
             opsview_login, opsview_pass = self._getOpsviewCredentials(auth_node)
             login_result = opsview.node_list[auth_node].loginUser(opsview_login, opsview_pass)
         return login_result.addCallback(onLogin, auth_node).addErrback(onError)
-        
+
     @_setTouchTime_decorator
     def authenticateNodes(self):
         def onSuccess(result):
@@ -695,11 +695,11 @@ class subscriber(object):
         d = defer.DeferredList(ds, consumeErrors=True)
         d.addCallbacks(onSuccess,onFailure)
         return d
-    
+
     @_setTouchTime_decorator
     def getUserName(self):
         return self.username
-    
+
     @_setTouchTime_decorator
     def getAuthNodes(self):
         node_list = []
@@ -708,15 +708,15 @@ class subscriber(object):
             node_list.append(node)
         log.debug('returning node list of length %s' % len(node_list))
         return node_list
-    
+
     @_setTouchTime_decorator
     def getPreviousSeries(self, chart):
         return chart.getPreviousSeries()
-    
+
     @_setTouchTime_decorator
     def resetPreviousSeries(self, chart):
         return chart.resetPreviousSeries()
-    
+
     @_setTouchTime_decorator
     def getHostList(self, selected_node, chart):
         chart.setSelectedNode(str(selected_node))
@@ -733,7 +733,7 @@ class subscriber(object):
         service_list.sort()
         return service_list
 
-    
+
     @_setTouchTime_decorator
     def getMetricList(self, selected_service, chart):
         chart.setSelectedService(str(selected_service))
@@ -759,7 +759,7 @@ class subscriber(object):
     @_setTouchTime_decorator
     def setMetric(self, selected_metric, chart):
         chart.setSelectedMetric(str(selected_metric))
-        
+
     @_setTouchTime_decorator
     def setRegexp(self, chart, keyP, patt):
         if patt == '*':
@@ -770,7 +770,7 @@ class subscriber(object):
             return False
         chart.setRegexp(keyP, patt)
         return self.getRegexpMatchCount(chart)
-        
+
     @_setTouchTime_decorator
     def getRegexpMatchCount(self, chart):
         tmp = chart.getRegexp()
@@ -778,7 +778,7 @@ class subscriber(object):
         regexpMatch = opsview.search(self.auth_node_list, dPatt, hPatt, sPatt, mPatt)
         dhsmList = self.getDhsmListFromDict(chart, regexpMatch)
         return (len(dhsmList),dhsmList[:])
-    
+
     def getDhsmListFromDict(self, chart, domainDict):
         dhsmList = []
         selectedDhsm = chart.getMetricSeries()[:]
@@ -790,7 +790,7 @@ class subscriber(object):
                         if tmpDhsm not in selectedDhsm:
                             dhsmList.append(tmpDhsm)
         return dhsmList[:]
-            
+
     def addRegexpSelect(self, chart):
         dhsmCount, dhsm = self.getRegexpMatchCount(chart)
         dhsmIndexedList = []
@@ -798,7 +798,7 @@ class subscriber(object):
             dhsmIndexed = chart.addUniqueSeries(row[:])
             dhsmIndexedList.append(dhsmIndexed)
         return dhsmIndexedList
-            
+
     @_setTouchTime_decorator
     def addGraphSeries(self, chart):
         return chart.getCurrentSeries()
@@ -806,7 +806,7 @@ class subscriber(object):
     @_setTouchTime_decorator
     def cancelSeriesId(self, series_id, chart):
         return chart.cancelSeriesId(series_id)
-    
+
     @_setTouchTime_decorator
     def getEventList(self, time_values, chart):
         if not len(time_values):
@@ -977,7 +977,7 @@ class subscriber(object):
                 self.reauth_node_defers_dict[data_node].append(d_dummy)
             else:
                 self.reauth_node_defers_dict[data_node] = [d_dummy]
-            
+
             log.debug("subscriber:checkNodes loop reauth_node_defers_dict=%s"%self.reauth_node_defers_dict)
 
         # prepare the final list of defers for all reauths
@@ -987,7 +987,7 @@ class subscriber(object):
         log.debug("subscriber:checkNodes:Final list of deferreds = %s"%reauth_node_defers_list)
         dlist = defer.DeferredList(reauth_node_defers_list, consumeErrors=True)
         return dlist
-         
+
 
     @_setTouchTime_decorator
     def makeGraph(self, chart, returnData=True, end_time=None, extendCache=False, skipODW=False):
@@ -1015,7 +1015,7 @@ class subscriber(object):
 
         def onReAuthFail(failure, chart, returnData=returnData, end_time=end_time, extendCache=extendCache, skipODW=skipODW):
             log.debug("subscriber:makeGraph: onReAuthFail failure=%s"%failure)
-       
+
         def onSeriesSuccess(result, series_id):
             log.debug('subscriber:makeGraph:onSeriesSuccess:sending data to chart object series_id=%s'%(series_id))
             chart.setSeriesData(series_id, result)
@@ -1057,7 +1057,10 @@ class subscriber(object):
             durSet = (chart.getChartDurationModifier(), chart.getChartDurationLength(), chart.getChartDurationUnit())
             endTime = startTime = None
         elif end_time:
-            startTime = opsview.node_list[data_node].getMaxCacheTimeValue(host, service, metric) + 1
+            maxCacheTime = opsview.node_list[data_node].getMaxCacheTimeValue(host, service, metric)
+            if not maxCacheTime:
+                maxCacheTime = int(time.time())
+            startTime = maxCacheTime + 1
             endTime = end_time
             durSet = None
             log.debug('end time provided by calling party')
@@ -1157,7 +1160,7 @@ class subscriber(object):
         result = defer.maybeDeferred(opsview.node_list[data_node].fetchData, api_uri, end_time, creds=creds, cookies=cookies, hsm=(host, service, metric), durSet=durSet, endTime=endTime, startTime=startTime, returnData=returnData, skipODW=skipODW)
         return result
     '''
-        
+
     @_setTouchTime_decorator
     def saveGraph(self, chart):
         return chart.saveGraph()
@@ -1169,15 +1172,15 @@ class subscriber(object):
     @_setTouchTime_decorator
     def getGraphEngineList(self):
         return graph_engines[:]
-    
+
     @_setTouchTime_decorator
     def getGraphEngine(self, chart):
         return chart.getChartEngine()
-    
+
     @_setTouchTime_decorator
     def getGraphType(self, chart):
         return chart.getChartType()
-    
+
     @_setTouchTime_decorator
     def setGraphEngine(self, engine, chart):
         chart_engine = str(engine)
@@ -1209,19 +1212,19 @@ class subscriber(object):
     @_setTouchTime_decorator
     def getGraphSizes(self):
         return graph_size
-    
+
     @_setTouchTime_decorator
     def getGraphName(self, chart):
         return chart.getChartName()
-    
+
     @_setTouchTime_decorator
     def getGraphTitle(self, chart):
         return chart.getChartTitle()
-    
+
     @_setTouchTime_decorator
     def getGraphSize(self, chart):
         return chart.getChartSize()
-    
+
     @_setTouchTime_decorator
     def getGraphStartTime(self, chart):
         if chart.getChartStart() == 'Now':
@@ -1230,20 +1233,20 @@ class subscriber(object):
             start_time = chart.getChartStart()
         date_time_object = datetime.datetime.fromtimestamp(start_time)
         return date_time_object.strftime("%m/%d/%Y %H:%M")
-    
+
     @_setTouchTime_decorator
     def getGraphDuration(self, chart):
         dur = '%s%s%s' % (chart.getChartDurationModifier(),chart.getChartDurationLength(),chart.getChartDurationUnit())
         return dur
-    
+
     @_setTouchTime_decorator
     def setGraphName(self, graph_name, chart):
         return chart.setChartName(graph_name)
-        
+
     @_setTouchTime_decorator
     def setGraphTitle(self, graph_title, chart):
         return chart.setChartTitle(graph_title)
-    
+
     @_setTouchTime_decorator
     def setGraphSize(self, size, chart):
         if size in graph_size:
@@ -1251,7 +1254,7 @@ class subscriber(object):
             return chart.setChartSize(size, width, height)
         else:
             return False
-    
+
     @_setTouchTime_decorator
     def setGraphDuration(self, duration, chart):
         if len(duration) == 0:
@@ -1283,7 +1286,7 @@ class subscriber(object):
         chart.setChartDurationUnit(dur_units)
         chart.setChartDurationModifier(dur_mod)
         return [str(dur_len), dur_units, dur_mod]
-    
+
     @_setTouchTime_decorator
     def setGraphStartTime(self, date_time, chart):
         if type(date_time) == float:
@@ -1307,7 +1310,7 @@ class subscriber(object):
             log.debug('sending start time %s to chart/suite' %  start_time)
             chart.setChartStart(start_time)
         return True
-    
+
     @_setTouchTime_decorator
     def setGraphPrivacy(self, privacy, chart):
         if privacy not in graph_privacy:
@@ -1315,15 +1318,15 @@ class subscriber(object):
         else:
             chart.setChartPrivacy(privacy)
             return true
-        
+
     @_setTouchTime_decorator
     def getGraphPrivacy(self, chart):
         return chart.getChartPrivacy()
-    
+
     @_setTouchTime_decorator
     def getGraphPrivacies(self):
         return graph_privacy.copy()
-    
+
     @_setTouchTime_decorator
     def setGraphEventType(self, e_type, chart):
         chart.setChartEventsDisplay(e_type)
@@ -1335,7 +1338,7 @@ class subscriber(object):
         else:
             chart.setChartEventsDisplayList([e_type])
         log.debug('displaying events: %s' % chart.getChartEventsDisplayList())
-        
+
     @_setTouchTime_decorator
     def getSavedGraphList(self):
         def onSuccess(result):
@@ -1353,7 +1356,7 @@ class subscriber(object):
         d = txdbinterface.getGraphList(self.username)
         d.addCallbacks(onSuccess,onFailure)
         return d
-    
+
     @_setTouchTime_decorator
     def loadGraph(self, dbId):
         def onCompleteSuccess(result):
@@ -1407,7 +1410,7 @@ class subscriber(object):
             self.currentChart = self.chartList.pop()
         else:
             self.currentChart = None
-        
+
 ###################### Authentication ######################
 def isLoggedIn(username):
     if username in subscribers:
@@ -1425,7 +1428,7 @@ def loginSubscriber(username, password):
             return subscriber(username, password).login()
     else:
         return subscriber(username, password).login()
-        
+
 def createSubscriber(username, password, first_name = None, last_name = None, opsview_creds = None):
     ''' Create a new user in the system '''
 
@@ -1442,14 +1445,14 @@ def createSubscriber(username, password, first_name = None, last_name = None, op
 def forgotPassword(username):
     ''' Reset the password to temporary value and send an email '''
     log.debug("subscriber: Resetting password for - %s"%username)
-    
+
     sub = subscriber(username, None)
     return sub.resetPassword()
 
 def updatePassword(username, password, new_password, opsview_creds):
     ''' Save the password and also update opsview credentials '''
     log.debug("subscriber: Updating password for - %s"%username)
-    
+
     sub = subscriber(username, password)
     return sub.updatePassword(new_password, opsview_creds)
 
